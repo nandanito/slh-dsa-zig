@@ -1,0 +1,105 @@
+name: fuzz
+
+# Fuzz testing driven by Zig's built-in fuzzer (`zig build test --fuzz`,
+# Zig 0.14+) and a dedicated `fuzz` step in `build.zig` to be added once
+# the scheme implementation lands.
+#
+# Strategy:
+#
+#   - On pull requests, run a *short* (~10 min) smoke fuzz so PRs that
+#     introduce obvious crashes don't merge silently.
+#   - Weekly, run a long (6h) sweep against the union of all parameter
+#     sets. Upload the corpus + any minimised crashers as artifacts.
+#   - Anyone can trigger a manual run via workflow_dispatch with a
+#     configurable duration.
+#
+# Targets (planned, will be added to `build.zig` alongside the
+# implementation):
+#
+#   zig build fuzz_verify   — feed arbitrary bytes to `Slh_Dsa.verify`.
+#                              Property: never panic, never accept.
+#   zig build fuzz_decode   — feed arbitrary bytes to the ADRS / signature
+#                              parsers. Property: never panic.
+#
+# Status: SKELETON. Today the workflow only confirms the build still
+# produces the test binary. The actual `fuzz` step is a TODO in
+# `build.zig`.
+
+on:
+  pull_request:
+    branches: [main]
+  schedule:
+    # Saturday 02:00 UTC — out of the way of the weekly ctgrind run.
+    - cron: '0 2 * * 6'
+  workflow_dispatch:
+    inputs:
+      duration_seconds:
+        description: 'Fuzz duration in seconds (manual runs only)'
+        required: false
+        default: '600'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fuzz:
+    name: fuzz (${{ github.event_name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 420  # 7h — enough headroom for the 6h scheduled run.
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@v1
+        with:
+          version: 0.16.0
+
+      - name: Determine fuzz duration
+        id: duration
+        shell: bash
+        run: |
+          case "${{ github.event_name }}" in
+            pull_request)
+              echo "secs=600"     >> "$GITHUB_OUTPUT"   # 10 min smoke
+              ;;
+            schedule)
+              echo "secs=21600"   >> "$GITHUB_OUTPUT"   # 6h weekly
+              ;;
+            workflow_dispatch)
+              echo "secs=${{ github.event.inputs.duration_seconds }}" >> "$GITHUB_OUTPUT"
+              ;;
+          esac
+
+      - name: Build (ensures targets are wired)
+        run: zig build
+
+      # The actual fuzz invocation will look something like:
+      #
+      #   timeout "${{ steps.duration.outputs.secs }}" \
+      #     zig build fuzz --summary all || true
+      #
+      # `|| true` because `timeout` exits non-zero when it terminates the
+      # process, which is the *expected* path for a time-limited fuzz
+      # run with no crashes.
+      #
+      # Until the fuzz step exists in build.zig, run the unit tests as a
+      # placeholder so the workflow has a deterministic green state.
+      - name: Run fuzz (placeholder — invokes unit tests for now)
+        shell: bash
+        run: |
+          secs="${{ steps.duration.outputs.secs }}"
+          echo "fuzz placeholder; planned duration ${secs}s"
+          zig build test --summary all
+
+      - name: Upload corpus & crashers (if any)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-corpus-${{ github.run_id }}
+          if-no-files-found: ignore
+          retention-days: 14
+          path: |
+            .zig-cache/fuzz/**
+            fuzz-corpus/**
+            crashers/**
