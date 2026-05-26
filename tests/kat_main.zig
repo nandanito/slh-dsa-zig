@@ -38,10 +38,7 @@ const usage =
     \\
 ;
 
-fn parseArgs(allocator: std.mem.Allocator) !Args {
-    var args = try std.process.argsAlloc(allocator);
-    defer std.process.argsFree(allocator, args);
-
+fn parseArgs(args: []const [:0]const u8) !Args {
     var out = Args{};
 
     var i: usize = 1; // skip argv[0]
@@ -95,12 +92,11 @@ fn parseArgs(allocator: std.mem.Allocator) !Args {
     return out;
 }
 
-pub fn main() !u8 {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
+pub fn main(init: std.process.Init) !u8 {
+    const allocator = init.arena.allocator();
+    const args = try init.minimal.args.toSlice(allocator);
 
-    const cli = parseArgs(allocator) catch return 1;
+    const cli = parseArgs(args) catch return 1;
 
     std.debug.print("slh-dsa-kat: mode={s} vectors={s}", .{
         @tagName(cli.mode.?),
@@ -120,7 +116,7 @@ pub fn main() !u8 {
     // decode each vector, and feed it to the right executor.
     // -----------------------------------------------------------------
 
-    var parsed = runner.loadVectorsFromFile(allocator, cli.vectors_path.?) catch |err| {
+    var parsed = runner.loadVectorsFromFile(init.io, allocator, cli.vectors_path.?) catch |err| {
         std.debug.print("error: failed to load vectors: {s}\n", .{@errorName(err)});
         return 1;
     };

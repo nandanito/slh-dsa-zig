@@ -142,15 +142,16 @@ pub const RunSummary = struct {
 /// Open a JSON vector file from disk and parse it into a `std.json.Value`.
 /// Caller frees the returned `Parsed` value.
 pub fn loadVectorsFromFile(
+    io: std.Io,
     allocator: std.mem.Allocator,
     path: []const u8,
 ) !std.json.Parsed(std.json.Value) {
-    const file = try std.fs.cwd().openFile(path, .{});
-    defer file.close();
-    const stat = try file.stat();
+    const file = try std.Io.Dir.cwd().openFile(io, path, .{});
+    defer file.close(io);
+    const stat = try file.stat(io);
     const buf = try allocator.alloc(u8, stat.size);
     defer allocator.free(buf);
-    _ = try file.readAll(buf);
+    _ = try file.readPositionalAll(io, buf, 0);
     return std.json.parseFromSlice(std.json.Value, allocator, buf, .{});
 }
 

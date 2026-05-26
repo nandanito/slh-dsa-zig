@@ -5,7 +5,7 @@
     // Fingerprint is a unique identifier for the package. Regenerate via
     // `zig init` if forking. The value below is a placeholder; replace before
     // tagging a release.
-    .fingerprint = 0x5103d5a51030000a,
+    .fingerprint = 0x748fe196f69178d2,
 
     .minimum_zig_version = "0.16.0",
 

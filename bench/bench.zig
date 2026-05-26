@@ -1,7 +1,7 @@
 //! Benchmark harness for slh-dsa-zig.
 //!
 //! Measures keygen / sign / verify for each parameter set using
-//! `std.time.Timer`. Reports median nanoseconds per operation and the
+//! `std.Io.Clock`. Reports median nanoseconds per operation and the
 //! derived ops/second.
 //!
 //! Build & run:
@@ -95,10 +95,7 @@ fn parseParamSetName(name: []const u8) ?slh_dsa.ParamSet {
     return null;
 }
 
-fn parseCli(allocator: std.mem.Allocator) !Cli {
-    var args = try std.process.argsAlloc(allocator);
-    defer std.process.argsFree(allocator, args);
-
+fn parseCli(args: []const [:0]const u8) !Cli {
     var cli = Cli{};
     var i: usize = 1;
     while (i < args.len) : (i += 1) {
@@ -187,6 +184,7 @@ fn printSample(s: Sample) void {
 // -----------------------------------------------------------------------------
 
 fn benchOne(
+    io: std.Io,
     allocator: std.mem.Allocator,
     comptime param_set: slh_dsa.ParamSet,
     op: Op,
@@ -206,13 +204,13 @@ fn benchOne(
         // TODO: drive Scheme.KeyPair.generate(io) in a loop once the
         // implementation lands. The skeleton call below will @panic,
         // which is the intended behaviour pre-implementation.
-        var t = try std.time.Timer.start();
         var i: u32 = 0;
         while (i < iters) : (i += 1) {
-            t.reset();
+            const start = std.Io.Clock.awake.now(io).nanoseconds;
             // _ = try Scheme.KeyPair.generate(io);
             std.mem.doNotOptimizeAway(Scheme.public_key_length);
-            ns[i] = t.read();
+            const end = std.Io.Clock.awake.now(io).nanoseconds;
+            ns[i] = @intCast(end - start);
         }
         printSample(computeStats(ns, "keygen", param_set, iters));
     }
@@ -229,12 +227,12 @@ fn benchOne(
 
         // TODO: real sign loop.
         //   try Scheme.sign(&sig, &msg, &sk, null);
-        var t = try std.time.Timer.start();
         var i: u32 = 0;
         while (i < iters) : (i += 1) {
-            t.reset();
+            const start = std.Io.Clock.awake.now(io).nanoseconds;
             std.mem.doNotOptimizeAway(&sk);
-            ns[i] = t.read();
+            const end = std.Io.Clock.awake.now(io).nanoseconds;
+            ns[i] = @intCast(end - start);
         }
         printSample(computeStats(ns, "sign", param_set, iters));
     }
@@ -251,12 +249,12 @@ fn benchOne(
 
         // TODO: real verify loop.
         //   _ = Scheme.verify(&sig, &msg, &pk) catch {};
-        var t = try std.time.Timer.start();
         var i: u32 = 0;
         while (i < iters) : (i += 1) {
-            t.reset();
+            const start = std.Io.Clock.awake.now(io).nanoseconds;
             std.mem.doNotOptimizeAway(&pk);
-            ns[i] = t.read();
+            const end = std.Io.Clock.awake.now(io).nanoseconds;
+            ns[i] = @intCast(end - start);
         }
         printSample(computeStats(ns, "verify", param_set, iters));
     }
@@ -266,12 +264,11 @@ fn benchOne(
 // Main.
 // -----------------------------------------------------------------------------
 
-pub fn main() !u8 {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
-    const allocator = arena.allocator();
+pub fn main(init: std.process.Init) !u8 {
+    const allocator = init.arena.allocator();
+    const args = try init.minimal.args.toSlice(allocator);
 
-    const cli = parseCli(allocator) catch return 1;
+    const cli = parseCli(args) catch return 1;
 
     std.debug.print("slh-dsa-bench (skeleton — bodies will panic until scheme lands)\n", .{});
     std.debug.print("note: compare against PQClean reference at " ++
@@ -296,10 +293,8 @@ pub fn main() !u8 {
     // Comptime fan-out over all 12 parameter sets so each `benchOne`
     // specialisation gets fully monomorphised.
     inline for (comptime std.enums.values(slh_dsa.ParamSet)) |ps| {
-        if (cli.param_set_filter) |filter| {
-            if (filter != ps) continue;
-        }
-        try benchOne(allocator, ps, cli.op, cli.iters_override);
+        const matches = cli.param_set_filter == null or cli.param_set_filter.? == ps;
+        if (matches) try benchOne(init.io, allocator, ps, cli.op, cli.iters_override);
     }
 
     return 0;
