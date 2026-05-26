@@ -331,7 +331,7 @@ comptime {
     //                     R    FORS sig   Hypertree (XMSS auth paths + WOTS+ sigs)
     //
     // Reference: FIPS 205 §11.
-    inline for (std.enums.values(ParamSet)) |ps| {
+    for (std.enums.values(ParamSet)) |ps| {
         const p = ps.params();
 
         if (p.h != p.h_prime * p.d) {

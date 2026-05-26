@@ -133,7 +133,7 @@ pub fn Fors(comptime p: params_mod.Params) type {
 }
 
 test "FORS sizes for slh_dsa_sha2_128s" {
-    const p = params_mod.ParamSet.slh_dsa_sha2_128s.params();
+    const p = comptime params_mod.ParamSet.slh_dsa_sha2_128s.params();
     const F = Fors(p);
     try std.testing.expectEqual(@as(usize, 12), F.a);
     try std.testing.expectEqual(@as(usize, 14), F.k);

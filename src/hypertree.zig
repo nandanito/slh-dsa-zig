@@ -86,7 +86,7 @@ pub fn Hypertree(comptime p: params_mod.Params) type {
 }
 
 test "Hypertree sizes for slh_dsa_sha2_128s" {
-    const p = params_mod.ParamSet.slh_dsa_sha2_128s.params();
+    const p = comptime params_mod.ParamSet.slh_dsa_sha2_128s.params();
     const HT = Hypertree(p);
     try std.testing.expectEqual(@as(usize, 7), HT.d);
     try std.testing.expectEqual(@as(usize, 63), HT.h);

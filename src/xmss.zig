@@ -110,7 +110,7 @@ pub fn Xmss(comptime p: params_mod.Params) type {
 }
 
 test "XMSS sizes for slh_dsa_sha2_128s" {
-    const p = params_mod.ParamSet.slh_dsa_sha2_128s.params();
+    const p = comptime params_mod.ParamSet.slh_dsa_sha2_128s.params();
     const X = Xmss(p);
     try std.testing.expectEqual(@as(usize, 9), X.h_prime);
     try std.testing.expectEqual(@as(usize, 1 << 9), X.tree_leaves);

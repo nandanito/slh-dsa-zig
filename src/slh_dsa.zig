@@ -43,9 +43,6 @@ pub const Error = error{
 /// Build the SLH-DSA namespace for a parameter set.
 pub fn Slh_Dsa(comptime param_set: ParamSet) type {
     const p = param_set.params();
-    const HtMod = hypertree_mod.Hypertree(p);
-    const ForsMod = fors_mod.Fors(p);
-    const Hash = hash_mod.Hash(p);
 
     return struct {
         pub const params = p;

@@ -142,7 +142,7 @@ pub fn Wots(comptime p: params_mod.Params) type {
 // -----------------------------------------------------------------------------
 
 test "WOTS+ sizes match FIPS 205 §11 derived values" {
-    const p = params_mod.ParamSet.slh_dsa_sha2_128s.params();
+    const p = comptime params_mod.ParamSet.slh_dsa_sha2_128s.params();
     const W = Wots(p);
     // For n=16, lg_w=4: len_1 = 32, len_2 = 3, len = 35.
     try std.testing.expectEqual(@as(usize, 32), W.len_1);

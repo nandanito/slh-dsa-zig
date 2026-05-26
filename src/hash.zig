@@ -54,7 +54,7 @@ const testing = std.testing;
 
 test "Hash adapter resolves for all parameter sets" {
     inline for (std.enums.values(params_mod.ParamSet)) |ps| {
-        const p = ps.params();
+        const p = comptime ps.params();
         _ = Hash(p);
     }
 }
