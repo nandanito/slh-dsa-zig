@@ -100,6 +100,38 @@ pub const Adrs = struct {
     pub fn slice(self: *const Adrs) []const u8 {
         return &self.bytes;
     }
+
+    /// Expand the 22-byte compressed ADRSc back to the 32-byte full ADRS
+    /// required by the SHAKE instantiations.
+    ///
+    /// FIPS 205 §11.1 hashes the full 32-byte ADRS (layer | tree | type |
+    /// type-specific, with the wider field widths). §11.2 §"compressed
+    /// version of ADRS" defines the compression as
+    ///
+    ///     ADRSc = ADRS[3] ∥ ADRS[8:16] ∥ ADRS[19] ∥ ADRS[20:32]
+    ///
+    /// so the inverse — zero-padding the dropped high-order bytes of layer,
+    /// tree, and type — reconstructs an ADRS that is byte-identical to what
+    /// the SHAKE formulas in §11.1 expect, *provided* no setter ever wrote
+    /// into those high-order bytes. The accessors in this module only take
+    /// a `u8` layer, `u64` tree, and `u8` type, so that precondition holds
+    /// by construction.
+    ///
+    /// Output layout (FIPS 205 §4.2):
+    ///   offset  bytes  field
+    ///   ──────  ─────  ─────────────────────────
+    ///   0       4      layer address (big-endian u32, low byte = ADRSc[0])
+    ///   4       12     tree address  (big-endian, low 8 bytes = ADRSc[1:9])
+    ///   16      4      type          (big-endian u32, low byte = ADRSc[9])
+    ///   20      12     type-specific (= ADRSc[10:22])
+    pub fn expand(self: Adrs) [32]u8 {
+        var out = std.mem.zeroes([32]u8);
+        out[3] = self.bytes[0];
+        @memcpy(out[8..16], self.bytes[1..9]);
+        out[19] = self.bytes[9];
+        @memcpy(out[20..32], self.bytes[10..22]);
+        return out;
+    }
 };
 
 // -----------------------------------------------------------------------------
@@ -138,4 +170,70 @@ test "tree index round-trips" {
     a.setType(.tree);
     a.setTreeIndex(0x12345678);
     try std.testing.expectEqual(@as(u32, 0x12345678), a.getTreeIndex());
+}
+
+test "expand: zero ADRSc maps to zero ADRS" {
+    const a = Adrs.init();
+    const full = a.expand();
+    const zero = std.mem.zeroes([32]u8);
+    try std.testing.expectEqualSlices(u8, &zero, &full);
+}
+
+test "expand: byte positions match FIPS 205 §11.2 layout" {
+    // Build a recognisable ADRSc: each meaningful byte set to a distinct
+    // value so we can read it off the expanded layout unambiguously.
+    var a = Adrs.init();
+    a.setLayer(0x7A);
+    a.setTreeAddress(0x0102030405060708);
+    a.setType(.fors_tree);
+    a.setKeyPairAddress(0xAABBCCDD);
+    a.setChainAddress(0x11223344);
+    a.setHashAddress(0x55667788);
+
+    const full = a.expand();
+
+    // ADRS[0..3] = 0 (high-order bytes of the u32 layer address).
+    try std.testing.expectEqualSlices(u8, &[_]u8{ 0, 0, 0 }, full[0..3]);
+    // ADRS[3] = ADRSc[0] = layer.
+    try std.testing.expectEqual(@as(u8, 0x7A), full[3]);
+    // ADRS[4..8] = 0 (high-order bytes of the 12-byte tree address).
+    try std.testing.expectEqualSlices(u8, &[_]u8{ 0, 0, 0, 0 }, full[4..8]);
+    // ADRS[8..16] = ADRSc[1..9] = 8-byte tree address.
+    try std.testing.expectEqualSlices(
+        u8,
+        &[_]u8{ 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08 },
+        full[8..16],
+    );
+    // ADRS[16..19] = 0 (high-order bytes of the u32 type).
+    try std.testing.expectEqualSlices(u8, &[_]u8{ 0, 0, 0 }, full[16..19]);
+    // ADRS[19] = ADRSc[9] = type.
+    try std.testing.expectEqual(@as(u8, @intFromEnum(AdrsType.fors_tree)), full[19]);
+    // ADRS[20..32] = ADRSc[10..22] = the three 4-byte type-specific slots.
+    try std.testing.expectEqualSlices(
+        u8,
+        &[_]u8{ 0xAA, 0xBB, 0xCC, 0xDD, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88 },
+        full[20..32],
+    );
+}
+
+test "expand: round-trips back to ADRSc per FIPS 205 §11.2" {
+    // Exercise every typed setter so each byte of ADRSc is non-zero.
+    var a = Adrs.init();
+    a.setLayer(0xAB);
+    a.setTreeAddress(0xDEADBEEFCAFEBABE);
+    a.setType(.wots_hash);
+    a.setKeyPairAddress(0x01020304);
+    a.setChainAddress(0x05060708);
+    a.setHashAddress(0x090A0B0C);
+
+    const full = a.expand();
+
+    // Recompress per ADRSc = ADRS[3] ∥ ADRS[8:16] ∥ ADRS[19] ∥ ADRS[20:32].
+    var recompressed: [22]u8 = undefined;
+    recompressed[0] = full[3];
+    @memcpy(recompressed[1..9], full[8..16]);
+    recompressed[9] = full[19];
+    @memcpy(recompressed[10..22], full[20..32]);
+
+    try std.testing.expectEqualSlices(u8, &a.bytes, &recompressed);
 }
