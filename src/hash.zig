@@ -1,8 +1,8 @@
-//! FIPS 205 §10 — Hash function instantiations.
+//! FIPS 205 §11 — Hash function instantiations.
 //!
 //! SLH-DSA defines six keyed hash functions (PRF, PRF_msg, H_msg, F, H, T_l).
-//! FIPS 205 §10.1 instantiates them with SHA-2; §10.2 instantiates them with
-//! SHAKE. This module is the comptime dispatcher that picks the right
+//! FIPS 205 §11.1 instantiates them with SHAKE; §11.2 instantiates them with
+//! SHA-2. This module is the comptime dispatcher that picks the right
 //! backend based on the parameter set.
 //!
 //! All adapter functions follow the same contract: a `pk_seed` (sometimes
@@ -51,10 +51,66 @@ pub fn Hash(comptime p: params_mod.Params) type {
 // -----------------------------------------------------------------------------
 
 const testing = std.testing;
+const Adrs = address.Adrs;
 
 test "Hash adapter resolves for all parameter sets" {
     inline for (std.enums.values(params_mod.ParamSet)) |ps| {
         const p = comptime ps.params();
         _ = Hash(p);
     }
+}
+
+test "every parameter set: PRF and F produce deterministic, non-zero output" {
+    inline for (std.enums.values(params_mod.ParamSet)) |ps| {
+        const p = comptime ps.params();
+        const H = Hash(p);
+        const n = H.n;
+
+        const sk_seed = [_]u8{0x5A} ** n;
+        const pk_seed = [_]u8{0xA5} ** n;
+        const msg = [_]u8{0x3C} ** n;
+
+        var adrs = Adrs.init();
+        adrs.setType(.wots_hash);
+        adrs.setKeyPairAddress(7);
+        adrs.setChainAddress(3);
+
+        // PRF — twice, assert deterministic and not all-zero.
+        var prf1: [n]u8 = undefined;
+        var prf2: [n]u8 = undefined;
+        H.prf(&sk_seed, &pk_seed, &adrs, &prf1);
+        H.prf(&sk_seed, &pk_seed, &adrs, &prf2);
+        try testing.expectEqualSlices(u8, &prf1, &prf2);
+        try testing.expect(!std.mem.allEqual(u8, &prf1, 0));
+
+        // F — twice, assert deterministic and not all-zero.
+        var f1: [n]u8 = undefined;
+        var f2: [n]u8 = undefined;
+        H.f(&pk_seed, &adrs, &msg, &f1);
+        H.f(&pk_seed, &adrs, &msg, &f2);
+        try testing.expectEqualSlices(u8, &f1, &f2);
+        try testing.expect(!std.mem.allEqual(u8, &f1, 0));
+    }
+}
+
+test "SHAKE and SHA-2 backends differ on identical inputs" {
+    // Same (pk_seed, adrs, msg) under matched 128-bit param sets must produce
+    // different F output — a sanity check that the dispatcher is not routing
+    // both families to the same implementation.
+    const Shake = Hash(comptime params_mod.ParamSet.slh_dsa_shake_128s.params());
+    const Sha2 = Hash(comptime params_mod.ParamSet.slh_dsa_sha2_128s.params());
+    const n = Shake.n; // == Sha2.n == 16
+
+    const pk_seed = [_]u8{0x11} ** n;
+    const msg = [_]u8{0x22} ** n;
+    var adrs = Adrs.init();
+    adrs.setType(.wots_hash);
+    adrs.setChainAddress(1);
+
+    var out_shake: [n]u8 = undefined;
+    var out_sha2: [n]u8 = undefined;
+    Shake.f(&pk_seed, &adrs, &msg, &out_shake);
+    Sha2.f(&pk_seed, &adrs, &msg, &out_sha2);
+
+    try testing.expect(!std.mem.eql(u8, &out_shake, &out_sha2));
 }
