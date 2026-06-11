@@ -116,11 +116,22 @@ a `type`, parameterised by the same `Params` struct.
 
 ## ADRS encoding
 
-`ADRS` (FIPS 205 §4.3) is a 32-byte address structure that disambiguates each hash call.
-We use the **compressed encoding** (FIPS 205 §11.2) throughout — the SHA-2 instances mandate
-it, and the SHAKE instances tolerate it.
+`ADRS` (FIPS 205 §4.3) is the address structure that disambiguates each hash call. FIPS 205
+defines two encodings:
 
-The structure is:
+- The **full ADRS** (32 bytes, FIPS 205 §4.2) — used by the SHAKE instantiations in §11.1.
+- The **compressed ADRSc** (22 bytes, FIPS 205 §11.2) — used by the SHA-2 instantiations
+  in §11.2.1 / §11.2.2.
+
+`Adrs` in this library stores the 22-byte compressed form as the canonical representation
+and exposes `Adrs.expand()` to produce the 32-byte full ADRS on demand for SHAKE consumers.
+Compression is lossless from this storage form because none of the typed setters write to
+the high-order bytes that ADRSc drops (the layer setter takes a `u8`, the tree setter a
+`u64`, the type setter a `u8`). The SHA-2 backend hashes `Adrs.slice()` directly; the SHAKE
+backend hashes `Adrs.expand()`. This keeps a single source of truth in memory and matches
+the byte-exact contract of FIPS 205 §11.1 and §11.2.
+
+The compressed structure is:
 
 ```
 +--------+----------------------+--------+---------------------------------+
@@ -130,8 +141,7 @@ The structure is:
 0        1                      9        10                              22
 ```
 
-(That's 22 bytes for the compressed encoding — see FIPS 205 §11.2. Earlier drafts used a
-32-byte encoding that this library does not implement.)
+(See `src/address.zig` and FIPS 205 §11.2 Figure 18.)
 
 ADRS types per FIPS 205 §4.2 Table 1:
 
