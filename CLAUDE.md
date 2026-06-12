@@ -199,8 +199,8 @@ src/              ← Lane A library. Crypto primitives, top-level scheme.
   address.zig     ← 22-byte compressed ADRS (FIPS 205 §11.2).
   util.zig        ← Algorithms 2 (base_2b) + 3 (toByte).
   hash.zig        ← family dispatcher (sha2 vs shake).
-  hash_sha2.zig   ← FIPS 205 §10.1 six-function adapter.
-  hash_shake.zig  ← FIPS 205 §10.2 six-function adapter.
+  hash_sha2.zig   ← FIPS 205 §11.2 six-function adapter.
+  hash_shake.zig  ← FIPS 205 §11.1 six-function adapter.
   wots.zig        ← FIPS 205 §5 (WOTS+).
   xmss.zig        ← FIPS 205 §6 (XMSS).
   hypertree.zig   ← FIPS 205 §7 (hypertree).
