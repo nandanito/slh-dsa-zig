@@ -18,8 +18,10 @@
 //!
 //! Constant-time: SHA-256/SHA-512/HMAC compression functions have no
 //! data-dependent branches or memory accesses. Secret inputs are `sk_seed`
-//! (PRF) and `sk_prf` (PRF_msg); the digests derived from them are scrubbed
-//! before returning. F/H/T_l/H_msg operate on public material only.
+//! (PRF), `sk_prf` (PRF_msg), and the WOTS+/FORS chain/leaf value fed to `F`;
+//! the hash state and truncated digest derived from them are scrubbed before
+//! returning. H/T_l/H_msg hash only public material (Merkle tree nodes, WOTS+
+//! public keys, FORS roots, the message and the public randomiser).
 
 const std = @import("std");
 const params_mod = @import("params.zig");
@@ -89,9 +91,10 @@ pub fn Sha2Adapter(comptime p: params_mod.Params) type {
             st.final(&digest);
             @memcpy(out, digest[0..n]);
             if (scrub) {
-                // PRF absorbed SK.seed: the hash's last-block buffer still holds
-                // those raw secret bytes, and the truncated tail of `digest` is
-                // secret-derived. Scrub both (volatile via secureZero).
+                // The caller absorbed secret material (SK.seed for PRF, a secret
+                // WOTS+ chain / FORS leaf value for F): the hash's last-block
+                // buffer still holds those raw bytes, and the truncated tail of
+                // `digest` is secret-derived. Scrub both (volatile via secureZero).
                 std.crypto.secureZero(u8, &digest);
                 std.crypto.secureZero(u8, std.mem.asBytes(st));
             }
@@ -165,7 +168,8 @@ pub fn Sha2Adapter(comptime p: params_mod.Params) type {
         /// FIPS 205 §11.2 — F (PK.seed, ADRS, M_1).
         ///
         /// Trunc_n(SHA-256(PK.seed || toByte(0, 64-n) || ADRSc || M_1)).
-        /// SHA-256 always.
+        /// SHA-256 always. In WOTS+ chaining and FORS leaf generation `M_1`
+        /// is a secret chain / leaf value, so the hash state is scrubbed.
         pub fn f(
             pk_seed: *const [n]u8,
             adrs: *const address.Adrs,
@@ -174,7 +178,7 @@ pub fn Sha2Adapter(comptime p: params_mod.Params) type {
         ) void {
             var st = keyedInit(Sha256, pk_seed, adrs);
             st.update(msg);
-            finishTrunc(Sha256, false, &st, out);
+            finishTrunc(Sha256, true, &st, out);
         }
 
         /// FIPS 205 §11.2 — H (PK.seed, ADRS, M_2).

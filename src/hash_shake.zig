@@ -12,8 +12,9 @@
 //!
 //! Constant-time: Keccak-f has no data-dependent branches or memory
 //! accesses, so every function here is constant-time over its (possibly
-//! secret) inputs. The only secret inputs are `sk_seed` (PRF) and `sk_prf`
-//! (PRF_msg); both flow straight into the sponge without copying.
+//! secret) inputs. Secret inputs are `sk_seed` (PRF), `sk_prf` (PRF_msg),
+//! and the WOTS+/FORS chain/leaf value fed to `F`; those paths scrub the
+//! sponge state after squeezing. H/T_l/H_msg hash only public material.
 
 const std = @import("std");
 const params_mod = @import("params.zig");
@@ -92,6 +93,8 @@ pub fn ShakeAdapter(comptime p: params_mod.Params) type {
         /// FIPS 205 §11.1 — F.
         ///
         /// F(PK.seed, ADRS, M_1) = SHAKE256(PK.seed || ADRS || M_1, 8n).
+        /// In WOTS+ chaining and FORS leaf generation `M_1` is a secret chain /
+        /// leaf value, so the sponge state is scrubbed after squeezing.
         pub fn f(
             pk_seed: *const [n]u8,
             adrs: *const address.Adrs,
@@ -104,6 +107,9 @@ pub fn ShakeAdapter(comptime p: params_mod.Params) type {
             st.update(&adrs_full);
             st.update(msg);
             st.final(out);
+            // `st` absorbed the secret M_1; final() clears only the sponge
+            // rate, so scrub the whole state (same rationale as PRF).
+            std.crypto.secureZero(u8, std.mem.asBytes(&st));
         }
 
         /// FIPS 205 §11.1 — H.
