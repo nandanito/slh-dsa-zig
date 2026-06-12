@@ -64,6 +64,7 @@ jobs:
       # EVEX-encoded 512-bit instructions that the apt Valgrind (3.22) cannot
       # decode — it SIGILLs before validating anything. v3 keeps realistic
       # vectorisation while staying within Valgrind's instruction support.
+      # Lift this back to native once Valgrind handles AVX-512 — see #6.
       - name: Build tests in ReleaseSafe with debug info
         run: |
           zig build test \
