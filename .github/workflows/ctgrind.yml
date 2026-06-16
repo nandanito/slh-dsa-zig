@@ -58,10 +58,18 @@ jobs:
           test -f /usr/include/valgrind/memcheck.h
           echo "valgrind memcheck headers found"
 
+      # Pin the target CPU to the x86-64-v3 microarchitecture level (AVX2,
+      # FMA, BMI — but NOT AVX-512). The GitHub x86_64 runners expose
+      # AVX-512, so a `native` build of the now-real SHA-2/SHA-3 code emits
+      # EVEX-encoded 512-bit instructions that the apt Valgrind (3.22) cannot
+      # decode — it SIGILLs before validating anything. v3 keeps realistic
+      # vectorisation while staying within Valgrind's instruction support.
+      # Lift this back to native once Valgrind handles AVX-512 — see #6.
       - name: Build tests in ReleaseSafe with debug info
         run: |
           zig build test \
             -Doptimize=ReleaseSafe \
+            -Dcpu=x86_64_v3 \
             --summary all
 
       # Skeleton run: invoke Valgrind on the test binary that `zig build

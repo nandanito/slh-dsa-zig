@@ -19,9 +19,9 @@ FIPS 205 §6    — XMSS                           src/xmss.zig
 FIPS 205 §7    — Hypertree                      src/hypertree.zig
 FIPS 205 §8    — FORS                           src/fors.zig
 FIPS 205 §9    — SLH-DSA (top-level scheme)     src/slh_dsa.zig
-FIPS 205 §10.1 — Hash functions (SHA-2)         src/hash_sha2.zig
-FIPS 205 §10.2 — Hash functions (SHAKE)         src/hash_shake.zig
 FIPS 205 §11   — Parameter sets                 src/params.zig
+FIPS 205 §11.1 — Hash functions (SHAKE)         src/hash_shake.zig
+FIPS 205 §11.2 — Hash functions (SHA-2)         src/hash_sha2.zig
 ```
 
 ## Layers
@@ -158,7 +158,7 @@ ADRS types per FIPS 205 §4.2 Table 1:
 ## Hash-adapter contract
 
 `Hash(params)` exposes six functions, all of which take a `pk_seed` (PK.seed) and an `adrs`,
-mirroring FIPS 205 §10:
+mirroring FIPS 205 §11:
 
 ```zig
 fn prf       (sk_seed: *const Seed, pk_seed: *const Seed, adrs: *const Adrs, out: *Seed) void;
@@ -172,9 +172,9 @@ fn t_l       (pk_seed: *const Seed, adrs: *const Adrs, msg: []const u8, out: *Se
 Two backends implement this contract:
 
 - **`hash_sha2.zig`** — `H`, `T_l`, `H_msg` use SHA-256 (and SHA-512 for L3/L5 sets, per
-  FIPS 205 §10.1). `F` uses SHA-256 for all sets. MGF1 is used for variable-length output.
+  FIPS 205 §11.2). `F` uses SHA-256 for all sets. MGF1 is used for variable-length output.
 - **`hash_shake.zig`** — All six functions are realised via SHAKE-256 with appropriate
-  output lengths (FIPS 205 §10.2).
+  output lengths (FIPS 205 §11.1).
 
 Backend selection happens at comptime based on the parameter set family.
 
