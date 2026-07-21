@@ -38,10 +38,10 @@ post-quantum cryptography effort in Zig, and the direct successor to
 
 | Component | Spec reference | Status |
 |---|---|---|
-| Parameter sets (all 12) | FIPS 205 §11 Table 2 | 🚧 Skeleton |
-| Hash adapters (SHA-2) | FIPS 205 §10.1 | 🚧 Skeleton |
-| Hash adapters (SHAKE) | FIPS 205 §10.2 | 🚧 Skeleton |
-| ADRS structure | FIPS 205 §4.3 | 🚧 Skeleton |
+| Parameter sets (all 12) | FIPS 205 §11 Table 2 | ✅ Implemented |
+| Hash adapters (SHA-2) | FIPS 205 §11.2 | ✅ Implemented |
+| Hash adapters (SHAKE) | FIPS 205 §11.1 | ✅ Implemented |
+| ADRS structure | FIPS 205 §4.3, §11.2 (ADRSc) | ✅ Implemented |
 | WOTS+ | FIPS 205 §5 | 🚧 Skeleton |
 | XMSS | FIPS 205 §6 | 🚧 Skeleton |
 | Hypertree | FIPS 205 §7 | 🚧 Skeleton |
@@ -54,9 +54,10 @@ post-quantum cryptography effort in Zig, and the direct successor to
 
 Legend: ✅ implemented and tested · 🚧 skeleton / in progress · ⏳ planned · ❌ not started
 
-The skeleton compiles, the test harness runs, and the build system is wired end-to-end. The
-cryptographic primitives themselves return `error.NotImplemented` until they are filled in
-under the discipline described below.
+The foundation layers (parameters, utilities, ADRS, both hash-adapter families) are
+implemented and unit-tested; KAT validation happens at scheme level once the tree above them
+lands. The remaining cryptographic primitives are stubs that `@panic` with the FIPS 205
+section reference until they are filled in under the discipline described below.
 
 ## Parameter sets
 
@@ -189,9 +190,9 @@ Phase 1 — `slh-dsa-zig` (this repo):
 
 - [x] Repository scaffold and CI matrix (x86_64 / ARM64)
 - [x] Parameter set definitions (all 12, comptime)
-- [ ] Hash adapters: SHA-2 (`MGF`, `PRF`, `H_msg`, `T_l`, `F`, `H`)
-- [ ] Hash adapters: SHAKE
-- [ ] ADRS structure and helpers
+- [x] Hash adapters: SHA-2 (`MGF`, `PRF`, `H_msg`, `T_l`, `F`, `H`)
+- [x] Hash adapters: SHAKE
+- [x] ADRS structure and helpers
 - [ ] WOTS+ chaining and signing (FIPS 205 §5)
 - [ ] XMSS tree construction and signing (FIPS 205 §6)
 - [ ] Hypertree signing and verification (FIPS 205 §7)

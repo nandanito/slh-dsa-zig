@@ -5,7 +5,7 @@
 //! It drives the FORS, hypertree, and hash layers; the details of each
 //! live in their own modules.
 //!
-//! API shape (planned — bodies @panic until Lane B implementation lands):
+//! API shape (planned — bodies @panic until the implementations land):
 //!
 //!   const Scheme = slh_dsa.Slh_Dsa(.slh_dsa_shake_128s);
 //!
