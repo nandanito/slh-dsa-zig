@@ -8,7 +8,7 @@
 
 const std = @import("std");
 
-/// FIPS 205 Algorithm 2 — base_2b.
+/// FIPS 205 Algorithm 4 — base_2b.
 ///
 /// Converts a byte string into a sequence of base-2^b integers. Used by
 /// WOTS+ to decompose a message hash into base-w (w = 2^lg_w) chain

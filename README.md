@@ -198,14 +198,14 @@ arrives as early as possible (see issue #7):
 - [x] Parameter set definitions (all 12, comptime)
 - [x] Hash adapters: SHA-2 + SHAKE (FIPS 205 §11)
 - [x] ADRS structure, compressed ADRSc + `expand()` (FIPS 205 §4.2–4.3, §11)
-- [x] WOTS+ `chain` + `pkGen` (FIPS 205 §5.1–5.2)
+- [x] WOTS+ `chain` + `pkGen` (FIPS 205 §5, §5.1)
 - [x] XMSS `node` (FIPS 205 §6.1)
 - [x] `slh_keygen_internal` + `KeyPair.generate` (FIPS 205 §9.1, §10.1)
 - [x] **NIST ACVP keyGen KAT pass, all 12 parameter sets**
 
 **Milestone 2 — signing path:**
 
-- [ ] WOTS+ `sign` + `pkFromSig` (FIPS 205 §5.3–5.4)
+- [ ] WOTS+ `sign` + `pkFromSig` (FIPS 205 §5.2–5.3)
 - [ ] XMSS `sign` + `pkFromSig` (FIPS 205 §6.2–6.3)
 - [ ] Hypertree signing and verification (FIPS 205 §7)
 - [ ] FORS signing and verification (FIPS 205 §8)

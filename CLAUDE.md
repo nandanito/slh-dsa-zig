@@ -111,7 +111,7 @@ Every cryptographic decision in `src/` must cite a primary source.
 Authoritative sources, in order of preference:
 
 1. **FIPS 205** (the standard itself). Cite sections, algorithms, and
-   table numbers: `// FIPS 205 §5.2 Algorithm 5 — wots_PKgen.`
+   table numbers: `// FIPS 205 §5.1 Algorithm 6 — wots_PKgen.`
 2. **The SPHINCS+ submission documents** for design rationale not in the
    FIPS standard.
 3. **NIST ACVP** for test vector format.
@@ -122,10 +122,19 @@ Authoritative sources, in order of preference:
 Blog posts are not citations. Wikipedia is not a citation. Stack
 Overflow is not a citation.
 
+**Cite the final publication (FIPS 205, August 2024), never the initial
+public draft (ipd).** The final standard inserted Algorithm 1 (`gen_len2`,
+§3.2), which shifted every later algorithm number up by one relative to the
+ipd, and renumbered the WOTS+ subsections (`chain` §5, `wots_pkGen` §5.1,
+`wots_sign` §5.2, `wots_pkFromSig` §5.3). Verify each algorithm number
+against the final PDF before citing it — a number recalled from memory or
+copied from a draft-era source is very likely off by one. See issue #16 for
+the full draft→final mapping.
+
 Doc comments in `src/` should include the FIPS 205 reference like so:
 
 ```zig
-/// FIPS 205 §5.1 Algorithm 4 — chain(X, i, s, PK.seed, ADRS).
+/// FIPS 205 §5 Algorithm 5 — chain(X, i, s, PK.seed, ADRS).
 ///
 /// Iterates the WOTS+ chaining function `s` times starting at index `i`,
 /// applying the hash + tweak per step. Constant-time over `s` because the
@@ -197,7 +206,7 @@ src/              ← Lane A library. Crypto primitives, top-level scheme.
   slh_dsa.zig     ← top-level Slh_Dsa(p) namespace per FIPS 205 §9/§10.
   params.zig      ← all 12 parameter sets (FIPS 205 §11 Table 2).
   address.zig     ← 22-byte compressed ADRS (FIPS 205 §11.2).
-  util.zig        ← Algorithms 2 (base_2b) + 3 (toByte).
+  util.zig        ← Algorithms 4 (base_2b) + 3 (toByte).
   hash.zig        ← family dispatcher (sha2 vs shake).
   hash_sha2.zig   ← FIPS 205 §11.2 six-function adapter.
   hash_shake.zig  ← FIPS 205 §11.1 six-function adapter.
