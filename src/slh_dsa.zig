@@ -79,6 +79,12 @@ pub fn Slh_Dsa(comptime param_set: ParamSet) type {
             ///
             /// FIPS 205 §10.1 — slh_keygen: draw SK.seed, SK.prf, PK.seed
             /// from an approved RBG, then derive via Algorithm 17.
+            ///
+            /// Uses `Io.randomSecure` (fresh OS entropy, no fallback), not
+            /// `Io.random`: the latter silently degrades to a best-effort
+            /// process-state seed when OS entropy is unavailable, which
+            /// would violate the approved-RBG requirement for key material.
+            /// Entropy failure surfaces as `error.IoError`.
             pub fn generate(io: std.Io) Error!KeyPair {
                 var sk_seed: [p.n]u8 = undefined;
                 var sk_prf: [p.n]u8 = undefined;
@@ -87,9 +93,9 @@ pub fn Slh_Dsa(comptime param_set: ParamSet) type {
                 // caller-owned KeyPair retains them by design.
                 defer std.crypto.secureZero(u8, &sk_seed);
                 defer std.crypto.secureZero(u8, &sk_prf);
-                io.random(&sk_seed);
-                io.random(&sk_prf);
-                io.random(&pk_seed);
+                io.randomSecure(&sk_seed) catch return Error.IoError;
+                io.randomSecure(&sk_prf) catch return Error.IoError;
+                io.randomSecure(&pk_seed) catch return Error.IoError;
                 return fromSeeds(&sk_seed, &sk_prf, &pk_seed);
             }
 
@@ -190,6 +196,13 @@ test "PublicKey/SecretKey/Signature are arrays" {
     try std.testing.expectEqual(@as(usize, 32), @sizeOf(S.PublicKey));
     try std.testing.expectEqual(@as(usize, 64), @sizeOf(S.SecretKey));
     try std.testing.expectEqual(@as(usize, 7856), @sizeOf(S.Signature));
+}
+
+test "generate: entropy failure surfaces as IoError, never a weak key" {
+    // std.Io.failing has no entropy source: randomSecure always returns
+    // error.EntropyUnavailable. generate must refuse, not fall back.
+    const S = Slh_Dsa(.slh_dsa_shake_128f);
+    try std.testing.expectError(Error.IoError, S.KeyPair.generate(std.Io.failing));
 }
 
 test "fromSeeds: deterministic; SK/PK layout per FIPS 205 §9.1" {
