@@ -201,5 +201,13 @@ pub fn main(init: std.process.Init) !u8 {
     });
 
     if (summary.failed > 0) return 1;
+    if (summary.total == 0) {
+        // A KAT invocation that executed zero vectors must not report
+        // success: it would let CI pass for unimplemented modes (sigGen/
+        // sigVer today), unknown parameter sets, or an empty vector file
+        // while validating nothing.
+        std.debug.print("error: no vectors were executed (unimplemented mode, unknown parameter sets, or empty file)\n", .{});
+        return 1;
+    }
     return 0;
 }
