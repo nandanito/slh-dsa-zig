@@ -20,8 +20,8 @@
 //!     for any message whose digits are pointwise >= those of the
 //!     original message. The checksum makes that impossible.
 //!
-//! Status: SKELETON. Public surface is set; bodies @panic with FIPS 205
-//! algorithm references until the Lane B implementation lands.
+//! Status: chain + pkGen implemented (keygen path); sign + pkFromSig are
+//! stubs that @panic with FIPS 205 algorithm references.
 
 const std = @import("std");
 const params_mod = @import("params.zig");
@@ -61,13 +61,15 @@ pub fn Wots(comptime p: params_mod.Params) type {
             adrs: *address.Adrs,
             out: *[n]u8,
         ) void {
-            _ = input;
-            _ = i;
-            _ = s;
-            _ = pk_seed;
-            _ = adrs;
-            _ = out;
-            @panic("TODO: WOTS+ chain not implemented yet (FIPS 205 §5.1 Algorithm 4)");
+            var tmp: [n]u8 = input.*;
+            var j: u32 = i;
+            while (j < i + s) : (j += 1) {
+                adrs.setHashAddress(j);
+                // In-place F is safe: both backends fully absorb the input
+                // before the output buffer is written.
+                Hash.f(pk_seed, adrs, &tmp, &tmp);
+            }
+            out.* = tmp;
         }
 
         // -----------------------------------------------------------------
@@ -85,11 +87,29 @@ pub fn Wots(comptime p: params_mod.Params) type {
             adrs: *address.Adrs,
             out_pk: *[n]u8,
         ) void {
-            _ = sk_seed;
-            _ = pk_seed;
-            _ = adrs;
-            _ = out_pk;
-            @panic("TODO: WOTS+ pkGen not implemented yet (FIPS 205 §5.2 Algorithm 5)");
+            // skADRS: same layer/tree/keypair as ADRS, type WOTS_PRF.
+            var sk_adrs = adrs.*;
+            sk_adrs.setType(.wots_prf);
+            sk_adrs.setKeyPairAddress(adrs.getKeyPairAddress());
+
+            var sk: [n]u8 = undefined;
+            defer std.crypto.secureZero(u8, &sk);
+
+            // tmp holds the chain endpoints — public key material, no scrub.
+            var tmp: [len * n]u8 = undefined;
+            for (0..len) |i| {
+                sk_adrs.setChainAddress(@intCast(i));
+                Hash.prf(sk_seed, pk_seed, &sk_adrs, &sk);
+                adrs.setChainAddress(@intCast(i));
+                chain(&sk, 0, @intCast(w - 1), pk_seed, adrs, tmp[i * n ..][0..n]);
+            }
+
+            // wotspkADRS: same layer/tree/keypair as ADRS, type WOTS_PK.
+            // (setType clears the chain/hash fields mutated by the loop.)
+            var pk_adrs = adrs.*;
+            pk_adrs.setType(.wots_pk);
+            pk_adrs.setKeyPairAddress(adrs.getKeyPairAddress());
+            Hash.t_l(pk_seed, &pk_adrs, &tmp, out_pk);
         }
 
         // -----------------------------------------------------------------
@@ -140,6 +160,74 @@ pub fn Wots(comptime p: params_mod.Params) type {
 // -----------------------------------------------------------------------------
 // Tests — sizes and surface area only until bodies land.
 // -----------------------------------------------------------------------------
+
+test "chain: s = 0 is the identity" {
+    const p = comptime params_mod.ParamSet.slh_dsa_shake_128f.params();
+    const W = Wots(p);
+    const x = [_]u8{0x42} ** W.n;
+    const pk_seed = [_]u8{0x11} ** W.n;
+    var adrs = address.Adrs.init();
+    adrs.setType(.wots_hash);
+    var out: [W.n]u8 = undefined;
+    W.chain(&x, 0, 0, &pk_seed, &adrs, &out);
+    try std.testing.expectEqualSlices(u8, &x, &out);
+}
+
+test "chain: composes — chain(x, 0, a+b) == chain(chain(x, 0, a), a, b)" {
+    // FIPS 205 §5.1: chaining is iterated F with the hash address tracking
+    // the absolute position, so splitting the walk must not change the result.
+    inline for (.{ params_mod.ParamSet.slh_dsa_shake_128f, params_mod.ParamSet.slh_dsa_sha2_128f }) |ps| {
+        const p = comptime ps.params();
+        const W = Wots(p);
+        const x = [_]u8{0xA7} ** W.n;
+        const pk_seed = [_]u8{0x33} ** W.n;
+
+        var adrs_one = address.Adrs.init();
+        adrs_one.setType(.wots_hash);
+        adrs_one.setChainAddress(5);
+        var full: [W.n]u8 = undefined;
+        W.chain(&x, 0, 15, &pk_seed, &adrs_one, &full);
+
+        var adrs_two = address.Adrs.init();
+        adrs_two.setType(.wots_hash);
+        adrs_two.setChainAddress(5);
+        var half: [W.n]u8 = undefined;
+        W.chain(&x, 0, 7, &pk_seed, &adrs_two, &half);
+        var split: [W.n]u8 = undefined;
+        W.chain(&half, 7, 8, &pk_seed, &adrs_two, &split);
+
+        try std.testing.expectEqualSlices(u8, &full, &split);
+    }
+}
+
+test "pkGen: deterministic, and distinct key pairs get distinct public keys" {
+    inline for (.{ params_mod.ParamSet.slh_dsa_shake_128f, params_mod.ParamSet.slh_dsa_sha2_128f }) |ps| {
+        const p = comptime ps.params();
+        const W = Wots(p);
+        const sk_seed = [_]u8{0x55} ** W.n;
+        const pk_seed = [_]u8{0xAA} ** W.n;
+
+        var adrs_a = address.Adrs.init();
+        adrs_a.setType(.wots_hash);
+        adrs_a.setKeyPairAddress(0);
+        var pk_a: [W.n]u8 = undefined;
+        W.pkGen(&sk_seed, &pk_seed, &adrs_a, &pk_a);
+
+        var adrs_a2 = address.Adrs.init();
+        adrs_a2.setType(.wots_hash);
+        adrs_a2.setKeyPairAddress(0);
+        var pk_a2: [W.n]u8 = undefined;
+        W.pkGen(&sk_seed, &pk_seed, &adrs_a2, &pk_a2);
+        try std.testing.expectEqualSlices(u8, &pk_a, &pk_a2);
+
+        var adrs_b = address.Adrs.init();
+        adrs_b.setType(.wots_hash);
+        adrs_b.setKeyPairAddress(1);
+        var pk_b: [W.n]u8 = undefined;
+        W.pkGen(&sk_seed, &pk_seed, &adrs_b, &pk_b);
+        try std.testing.expect(!std.mem.eql(u8, &pk_a, &pk_b));
+    }
+}
 
 test "WOTS+ sizes match FIPS 205 §11 derived values" {
     const p = comptime params_mod.ParamSet.slh_dsa_sha2_128s.params();

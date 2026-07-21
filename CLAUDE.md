@@ -91,7 +91,7 @@ These are non-negotiable for code in `src/`:
 | **Constant-time** | No secret-dependent branches. No secret-dependent memory accesses. No early returns on secret data. No table lookups indexed by secret bits. |
 | **No allocations in hot paths** | Stack buffers, comptime sizing, explicit lifetimes. Heap use must be justified and documented. |
 | **Zeroize secrets** | Every secret cleared before scope exit. Use volatile semantics where the compiler may DCE the zeroing. |
-| **KAT-validated** | Every primitive must pass NIST ACVP test vectors before being declared functional. |
+| **KAT-validated** | Scheme-level operations (keyGen/sigGen/sigVer) must pass NIST ACVP vectors before being declared functional. Components without NIST vectors (WOTS+, XMSS, FORS internals) are validated via the scheme-level KATs that exercise them, spec-derived property tests, and reference-derived intermediate fixtures where needed (issue #7). |
 | **Fuzzed** | Every parser, deserializer, and public API gets a fuzz harness running ≥24h in CI. |
 | **Benchmarked** | Performance must be within 2× of PQClean C reference on equivalent hardware. |
 | **ctgrind/valgrind-verified** | Constant-time properties empirically verified, not just claimed. |

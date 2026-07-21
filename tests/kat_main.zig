@@ -92,6 +92,71 @@ fn parseArgs(args: []const [:0]const u8) !Args {
     return out;
 }
 
+/// Walk the parsed ACVP structure (testGroups -> tests), dispatch each
+/// vector, and accumulate a summary. All field accesses go through the
+/// typed accessors in kat_runner so malformed files produce
+/// `error.MalformedVectorFile` instead of a union-access panic.
+fn runVectors(
+    allocator: std.mem.Allocator,
+    root_value: std.json.Value,
+    mode: runner.VectorType,
+    param_set_filter: ?slh_dsa.ParamSet,
+) !runner.RunSummary {
+    var summary = runner.RunSummary{};
+
+    const root = try runner.asObject(root_value);
+    const groups = try runner.asArray(try runner.getField(root, "testGroups"));
+
+    for (groups.items) |group| {
+        const gobj = try runner.asObject(group);
+        const ps_name = try runner.asString(try runner.getField(gobj, "parameterSet"));
+        const tests = try runner.asArray(try runner.getField(gobj, "tests"));
+
+        const ps = runner.parseParamSet(ps_name) orelse {
+            std.debug.print("warning: unknown parameter set '{s}', skipping group\n", .{ps_name});
+            summary.skipped += @intCast(tests.items.len);
+            continue;
+        };
+        if (param_set_filter) |filter| {
+            if (ps != filter) continue;
+        }
+
+        for (tests.items) |tc| {
+            const tobj = try runner.asObject(tc);
+            const tc_id = try runner.asTcId(try runner.getField(tobj, "tcId"));
+
+            switch (mode) {
+                .key_gen => {
+                    const v = runner.KeyGenVector{
+                        .tc_id = tc_id,
+                        .param_set = ps,
+                        .sk_seed = try runner.hexDecode(allocator, try runner.asString(try runner.getField(tobj, "skSeed"))),
+                        .sk_prf = try runner.hexDecode(allocator, try runner.asString(try runner.getField(tobj, "skPrf"))),
+                        .pk_seed = try runner.hexDecode(allocator, try runner.asString(try runner.getField(tobj, "pkSeed"))),
+                        .expected_pk = try runner.hexDecode(allocator, try runner.asString(try runner.getField(tobj, "pk"))),
+                        .expected_sk = try runner.hexDecode(allocator, try runner.asString(try runner.getField(tobj, "sk"))),
+                    };
+                    const result = try runner.runKeyGen(allocator, v);
+                    summary.record(result);
+                    if (!result.pass) {
+                        std.debug.print("FAIL {s} tcId={d}: {s}\n", .{
+                            @tagName(result.param_set),
+                            result.tc_id,
+                            result.detail orelse "(no detail)",
+                        });
+                    }
+                },
+                .sig_gen, .sig_ver => {
+                    // Not implemented yet — counted as skipped, not failed.
+                    summary.skipped += 1;
+                },
+            }
+        }
+    }
+
+    return summary;
+}
+
 pub fn main(init: std.process.Init) !u8 {
     const allocator = init.arena.allocator();
     const args = try init.minimal.args.toSlice(allocator);
@@ -111,9 +176,8 @@ pub fn main(init: std.process.Init) !u8 {
     // -----------------------------------------------------------------
     // Load and dispatch.
     //
-    // SKELETON: the executors in kat_runner currently return "skipped"
-    // results. Once the scheme bodies land we walk testGroups -> tests,
-    // decode each vector, and feed it to the right executor.
+    // keyGen is fully wired. sigGen/sigVer are counted as skipped until
+    // sign/verify land.
     // -----------------------------------------------------------------
 
     var parsed = runner.loadVectorsFromFile(init.io, allocator, cli.vectors_path.?) catch |err| {
@@ -122,16 +186,12 @@ pub fn main(init: std.process.Init) !u8 {
     };
     defer parsed.deinit();
 
-    var summary = runner.RunSummary{};
-
-    // The real loop will go here. For now we mark every vector as
-    // skipped so the build target at least exits cleanly against a
-    // well-formed JSON file.
-    //
-    // TODO: walk `parsed.value` as a std.json.Value, iterate
-    //       testGroups, parse per-mode fields, dispatch to runKeyGen /
-    //       runSigGen / runSigVer, accumulate into `summary`.
-    summary.skipped = 0;
+    const summary = runVectors(allocator, parsed.value, cli.mode.?, cli.param_set_filter) catch |err| {
+        // ACVP files are external input: any shape mismatch (or bad hex)
+        // lands here as a controlled failure rather than a safety panic.
+        std.debug.print("error: failed to process vector file: {s}\n", .{@errorName(err)});
+        return 1;
+    };
 
     std.debug.print("\nresults: total={d} passed={d} failed={d} skipped={d}\n", .{
         summary.total,
@@ -141,5 +201,13 @@ pub fn main(init: std.process.Init) !u8 {
     });
 
     if (summary.failed > 0) return 1;
+    if (summary.total == 0) {
+        // A KAT invocation that executed zero vectors must not report
+        // success: it would let CI pass for unimplemented modes (sigGen/
+        // sigVer today), unknown parameter sets, or an empty vector file
+        // while validating nothing.
+        std.debug.print("error: no vectors were executed (unimplemented mode, unknown parameter sets, or empty file)\n", .{});
+        return 1;
+    }
     return 0;
 }
