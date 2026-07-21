@@ -91,7 +91,9 @@ gets you external validation earliest:
 4. WOTS+ chaining and public-key generation (§5.1–5.2).
 5. XMSS tree hashing (§6.1).
 6. Key generation (§9.1, §10.1) — **stop here and run the ACVP keyGen
-   vectors.** If all 12 parameter sets pass, everything below is right.
+   vectors.** If all 12 parameter sets pass, everything you have built
+   in steps 1–5 is right. (The signing side in steps 7–8 is still
+   unwritten and unvalidated at this point.)
 7. The signing side: WOTS+ sign, XMSS sign, hypertree, FORS, top-level
    sign/verify with context strings (§5.3 → §10).
 8. ACVP sigGen + sigVer, all 12 sets.
