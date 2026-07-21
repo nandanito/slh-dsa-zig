@@ -8,7 +8,7 @@
 //! SLH-DSA stacks `d` XMSS trees into a hypertree. This module handles a
 //! single XMSS layer; the hypertree composition lives in `hypertree.zig`.
 //!
-//! Status: SKELETON.
+//! Status: node implemented (keygen path); sign + pkFromSig are stubs.
 
 const std = @import("std");
 const params_mod = @import("params.zig");
@@ -36,10 +36,11 @@ pub fn Xmss(comptime p: params_mod.Params) type {
         // public key (i.e. wots_PKgen output). Inductive case stacks two
         // child nodes via H.
         //
-        // NOTE: This is the obvious recursive formulation. Production
-        // implementations should use the TreeHash construction (FIPS 205
-        // §6.1 Algorithm 9) to bound stack usage to h' entries. Decide
-        // which to land in upstream-candidate during Lane B.
+        // NOTE: This is the recursive formulation as written in the
+        // standard. Recursion depth is bounded by h' (≤ 9 across all
+        // parameter sets), i.e. ~2n bytes of locals per frame — fine for
+        // stack use. An iterative treehash (as used by the SPHINCS+
+        // reference implementation) is a possible later optimisation.
         // -----------------------------------------------------------------
         pub fn node(
             sk_seed: *const [n]u8,
@@ -49,13 +50,27 @@ pub fn Xmss(comptime p: params_mod.Params) type {
             adrs: *address.Adrs,
             out: *[n]u8,
         ) void {
-            _ = sk_seed;
-            _ = i;
-            _ = z;
-            _ = pk_seed;
-            _ = adrs;
-            _ = out;
-            @panic("TODO: xmss_node not implemented yet (FIPS 205 §6.1 Algorithm 8)");
+            // Validity per FIPS 205 §6.1: z ≤ h' and i < 2^(h'-z). Both are
+            // public values, so branching on them is CT-safe.
+            std.debug.assert(z <= p.h_prime);
+            std.debug.assert(i < @as(u32, 1) << @as(u5, @intCast(p.h_prime - z)));
+
+            if (z == 0) {
+                adrs.setType(.wots_hash);
+                adrs.setKeyPairAddress(i);
+                Wots.pkGen(sk_seed, pk_seed, adrs, out);
+            } else {
+                // All tree nodes hash public WOTS+ public keys — no secret
+                // residue to scrub in lnode/rnode.
+                var lnode: [n]u8 = undefined;
+                var rnode: [n]u8 = undefined;
+                node(sk_seed, 2 * i, z - 1, pk_seed, adrs, &lnode);
+                node(sk_seed, 2 * i + 1, z - 1, pk_seed, adrs, &rnode);
+                adrs.setType(.tree);
+                adrs.setTreeHeight(z);
+                adrs.setTreeIndex(i);
+                Hash.h(pk_seed, adrs, &lnode, &rnode, out);
+            }
         }
 
         // -----------------------------------------------------------------
@@ -107,6 +122,39 @@ pub fn Xmss(comptime p: params_mod.Params) type {
             @panic("TODO: xmss_pkFromSig not implemented yet (FIPS 205 §6.3 Algorithm 10)");
         }
     };
+}
+
+test "node: deterministic and equals H over its two children" {
+    // FIPS 205 §6.1 Algorithm 8 inductive case, checked by hand at z = 1:
+    // node(i=0, z=1) must equal H(PK.seed, TREE-adrs(z=1, i=0), leaf_0, leaf_1).
+    inline for (.{ params_mod.ParamSet.slh_dsa_shake_128f, params_mod.ParamSet.slh_dsa_sha2_128f }) |ps| {
+        const p = comptime ps.params();
+        const X = Xmss(p);
+        const H = hash_mod.Hash(p);
+        const sk_seed = [_]u8{0x5A} ** X.n;
+        const pk_seed = [_]u8{0xA5} ** X.n;
+
+        var adrs = address.Adrs.init();
+        var parent: [X.n]u8 = undefined;
+        X.node(&sk_seed, 0, 1, &pk_seed, &adrs, &parent);
+
+        var adrs_l = address.Adrs.init();
+        var leaf_0: [X.n]u8 = undefined;
+        X.node(&sk_seed, 0, 0, &pk_seed, &adrs_l, &leaf_0);
+
+        var adrs_r = address.Adrs.init();
+        var leaf_1: [X.n]u8 = undefined;
+        X.node(&sk_seed, 1, 0, &pk_seed, &adrs_r, &leaf_1);
+
+        var adrs_h = address.Adrs.init();
+        adrs_h.setType(.tree);
+        adrs_h.setTreeHeight(1);
+        adrs_h.setTreeIndex(0);
+        var expected: [X.n]u8 = undefined;
+        H.h(&pk_seed, &adrs_h, &leaf_0, &leaf_1, &expected);
+
+        try std.testing.expectEqualSlices(u8, &expected, &parent);
+    }
 }
 
 test "XMSS sizes for slh_dsa_sha2_128s" {

@@ -14,7 +14,7 @@
 const std = @import("std");
 const slh_dsa = @import("slh_dsa");
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
     // Pick a parameter set at comptime. The 12 options live in
     // `slh_dsa.ParamSet`; "s" variants are smaller signatures + slower
     // signing, "f" variants are the inverse.
@@ -28,11 +28,8 @@ pub fn main() !void {
     // -----------------------------------------------------------------
     // Key generation.
     //
-    // `KeyPair.generate` draws three n-byte values from a CSPRNG
-    // exposed via `std.Io`. For example purposes we'd normally pass
-    // the default Io implementation here; the exact shape depends on
-    // Zig 0.16's std.Io migration and will be filled in alongside the
-    // implementation.
+    // `KeyPair.generate` draws three n-byte values from the CSPRNG
+    // exposed by `std.Io` (the same idiom `std.crypto`'s Ed25519 uses).
     //
     // For deterministic / test workflows, use `KeyPair.fromSeeds`:
     //
@@ -42,10 +39,8 @@ pub fn main() !void {
     //   const kp = try Scheme.KeyPair.fromSeeds(&sk_seed, &sk_prf, &pk_seed);
     // -----------------------------------------------------------------
 
-    // TODO: switch the placeholder below for the real `std.Io` once
-    // wired up in `src/slh_dsa.zig`.
-    const io = {}; // placeholder until the std.Io plumbing lands
-    const kp = try Scheme.KeyPair.generate(io);
+    std.debug.print("generating keypair (top XMSS tree, 512 leaves)...\n", .{});
+    const kp = try Scheme.KeyPair.generate(init.io);
 
     // -----------------------------------------------------------------
     // Sign.

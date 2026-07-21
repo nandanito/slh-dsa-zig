@@ -210,8 +210,22 @@ Three layers of tests, in order of importance:
 3. **Fuzz harnesses** — every public deserialiser carries a fuzz harness, focused on the
    verifier (which by construction handles attacker-controlled signatures).
 
-Unit tests at each layer (WOTS+, XMSS, hypertree, FORS) use small toy parameter sets where
-possible to keep the test suite fast, plus targeted tests against the full parameter sets.
+Two structural notes on how the KAT gate is applied (issue #7):
+
+- **No component-level NIST vectors exist.** ACVP only tests keyGen / sigGen / sigVer at
+  scheme level. Components (WOTS+, XMSS, hypertree, FORS) are validated by (a) the
+  scheme-level KATs that exercise them, (b) spec-derived property tests (e.g. chain
+  composition, node/H consistency), and (c) — where a component is not yet reachable from
+  a passing scheme-level KAT — intermediate fixtures extracted from the SPHINCS+/PQClean
+  reference implementations (cross-validation only; never copied code).
+- **Keygen-first ordering.** `slh_keygen_internal` needs only `chain`, `wots_pkgen`, and
+  `xmss_node`, so the keyGen KATs deliver external byte-for-byte validation roughly halfway
+  up the component tree before any signing code exists. The signing path is built against
+  the already-KAT-validated bottom stack.
+
+Unit tests at each layer (WOTS+, XMSS, hypertree, FORS) prefer the `f`-variant parameter
+sets (small trees, h' ≤ 4) to keep the Debug test suite fast; the `s`-variants are covered
+by the KAT runs.
 
 ## Build outputs
 

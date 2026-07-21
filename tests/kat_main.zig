@@ -111,9 +111,8 @@ pub fn main(init: std.process.Init) !u8 {
     // -----------------------------------------------------------------
     // Load and dispatch.
     //
-    // SKELETON: the executors in kat_runner currently return "skipped"
-    // results. Once the scheme bodies land we walk testGroups -> tests,
-    // decode each vector, and feed it to the right executor.
+    // keyGen is fully wired. sigGen/sigVer are counted as skipped until
+    // sign/verify land.
     // -----------------------------------------------------------------
 
     var parsed = runner.loadVectorsFromFile(init.io, allocator, cli.vectors_path.?) catch |err| {
@@ -124,14 +123,62 @@ pub fn main(init: std.process.Init) !u8 {
 
     var summary = runner.RunSummary{};
 
-    // The real loop will go here. For now we mark every vector as
-    // skipped so the build target at least exits cleanly against a
-    // well-formed JSON file.
-    //
-    // TODO: walk `parsed.value` as a std.json.Value, iterate
-    //       testGroups, parse per-mode fields, dispatch to runKeyGen /
-    //       runSigGen / runSigVer, accumulate into `summary`.
-    summary.skipped = 0;
+    const root = switch (parsed.value) {
+        .object => |o| o,
+        else => {
+            std.debug.print("error: vector file root is not a JSON object\n", .{});
+            return 1;
+        },
+    };
+    const groups = root.get("testGroups") orelse {
+        std.debug.print("error: no testGroups in vector file\n", .{});
+        return 1;
+    };
+
+    for (groups.array.items) |group| {
+        const gobj = group.object;
+        const ps_name = gobj.get("parameterSet").?.string;
+        const ps = runner.parseParamSet(ps_name) orelse {
+            std.debug.print("warning: unknown parameter set '{s}', skipping group\n", .{ps_name});
+            summary.skipped += @intCast(gobj.get("tests").?.array.items.len);
+            continue;
+        };
+        if (cli.param_set_filter) |filter| {
+            if (ps != filter) continue;
+        }
+
+        for (gobj.get("tests").?.array.items) |tc| {
+            const tobj = tc.object;
+            const tc_id: u64 = @intCast(tobj.get("tcId").?.integer);
+
+            switch (cli.mode.?) {
+                .key_gen => {
+                    const v = runner.KeyGenVector{
+                        .tc_id = tc_id,
+                        .param_set = ps,
+                        .sk_seed = try runner.hexDecode(allocator, tobj.get("skSeed").?.string),
+                        .sk_prf = try runner.hexDecode(allocator, tobj.get("skPrf").?.string),
+                        .pk_seed = try runner.hexDecode(allocator, tobj.get("pkSeed").?.string),
+                        .expected_pk = try runner.hexDecode(allocator, tobj.get("pk").?.string),
+                        .expected_sk = try runner.hexDecode(allocator, tobj.get("sk").?.string),
+                    };
+                    const result = try runner.runKeyGen(allocator, v);
+                    summary.record(result);
+                    if (!result.pass) {
+                        std.debug.print("FAIL {s} tcId={d}: {s}\n", .{
+                            @tagName(result.param_set),
+                            result.tc_id,
+                            result.detail orelse "(no detail)",
+                        });
+                    }
+                },
+                .sig_gen, .sig_ver => {
+                    // Not implemented yet — counted as skipped, not failed.
+                    summary.skipped += 1;
+                },
+            }
+        }
+    }
 
     std.debug.print("\nresults: total={d} passed={d} failed={d} skipped={d}\n", .{
         summary.total,

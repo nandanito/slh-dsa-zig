@@ -42,22 +42,25 @@ post-quantum cryptography effort in Zig, and the direct successor to
 | Hash adapters (SHA-2) | FIPS 205 §11.2 | ✅ Implemented |
 | Hash adapters (SHAKE) | FIPS 205 §11.1 | ✅ Implemented |
 | ADRS structure | FIPS 205 §4.3, §11.2 (ADRSc) | ✅ Implemented |
-| WOTS+ | FIPS 205 §5 | 🚧 Skeleton |
-| XMSS | FIPS 205 §6 | 🚧 Skeleton |
+| WOTS+ | FIPS 205 §5 | 🚧 `chain` + `pkGen` ✅ · sign path pending |
+| XMSS | FIPS 205 §6 | 🚧 `node` ✅ · sign path pending |
 | Hypertree | FIPS 205 §7 | 🚧 Skeleton |
 | FORS | FIPS 205 §8 | 🚧 Skeleton |
-| SLH-DSA keygen / sign / verify | FIPS 205 §9–10 | 🚧 Skeleton |
-| NIST ACVP KAT runner | — | 🚧 Skeleton |
+| SLH-DSA key generation | FIPS 205 §9.1, §10.1 | ✅ ACVP keyGen KATs pass (120/120, all 12 sets) |
+| SLH-DSA sign / verify | FIPS 205 §9.2–9.3, §10 | 🚧 Skeleton |
+| NIST ACVP KAT runner | — | 🚧 keyGen mode ✅ · sigGen/sigVer pending |
 | Benchmarks vs PQClean | — | 🚧 Skeleton |
 | Constant-time verification | ctgrind / valgrind | ⏳ Planned |
 | Fuzz harnesses | std.testing.fuzz | ⏳ Planned |
 
 Legend: ✅ implemented and tested · 🚧 skeleton / in progress · ⏳ planned · ❌ not started
 
-The foundation layers (parameters, utilities, ADRS, both hash-adapter families) are
-implemented and unit-tested; KAT validation happens at scheme level once the tree above them
-lands. The remaining cryptographic primitives are stubs that `@panic` with the FIPS 205
-section reference until they are filled in under the discipline described below.
+Key generation is implemented end-to-end and passes the NIST ACVP keyGen vectors for all 12
+parameter sets — which also exercises both hash-adapter families, the ADRS encodings, WOTS+
+public-key generation, and XMSS tree hashing against external ground truth. The signing
+path (WOTS+/XMSS sign, hypertree, FORS, top-level sign/verify) consists of stubs that
+`@panic` with the FIPS 205 section reference until they are filled in under the discipline
+described below.
 
 ## Parameter sets
 
@@ -186,22 +189,35 @@ See [SECURITY.md](SECURITY.md) for the responsible-disclosure policy and current
 
 ## Roadmap
 
-Phase 1 — `slh-dsa-zig` (this repo):
+Phase 1 — `slh-dsa-zig` (this repo), ordered so external KAT validation
+arrives as early as possible (see issue #7):
+
+**Milestone 1 — key generation (complete):**
 
 - [x] Repository scaffold and CI matrix (x86_64 / ARM64)
 - [x] Parameter set definitions (all 12, comptime)
-- [x] Hash adapters: SHA-2 (`MGF`, `PRF`, `H_msg`, `T_l`, `F`, `H`)
-- [x] Hash adapters: SHAKE
-- [x] ADRS structure and helpers
-- [ ] WOTS+ chaining and signing (FIPS 205 §5)
-- [ ] XMSS tree construction and signing (FIPS 205 §6)
+- [x] Hash adapters: SHA-2 + SHAKE (FIPS 205 §11)
+- [x] ADRS structure, compressed ADRSc + `expand()` (FIPS 205 §4.2–4.3, §11)
+- [x] WOTS+ `chain` + `pkGen` (FIPS 205 §5.1–5.2)
+- [x] XMSS `node` (FIPS 205 §6.1)
+- [x] `slh_keygen_internal` + `KeyPair.generate` (FIPS 205 §9.1, §10.1)
+- [x] **NIST ACVP keyGen KAT pass, all 12 parameter sets**
+
+**Milestone 2 — signing path:**
+
+- [ ] WOTS+ `sign` + `pkFromSig` (FIPS 205 §5.3–5.4)
+- [ ] XMSS `sign` + `pkFromSig` (FIPS 205 §6.2–6.3)
 - [ ] Hypertree signing and verification (FIPS 205 §7)
 - [ ] FORS signing and verification (FIPS 205 §8)
-- [ ] Top-level `slh_keygen`, `slh_sign`, `slh_verify` (FIPS 205 §9–10)
-- [ ] NIST ACVP KAT pass for all 12 parameter sets
+- [ ] Context-string API decision (issue #8) + top-level `slh_sign`, `slh_verify`
+- [ ] **NIST ACVP sigGen + sigVer KAT pass, all 12 parameter sets**
+
+**Milestone 3 — hardening and release:**
+
 - [ ] Constant-time audit pass (ctgrind / valgrind)
-- [ ] Fuzz harnesses + 24h CI fuzz job
-- [ ] Benchmark suite + PQClean comparison
+- [ ] Fuzz harnesses + cumulative nightly fuzzing (issue #9)
+- [ ] Benchmark suite + pinned PQClean comparison (issue #10)
+- [ ] Upstream temperature check before Lane B starts (issue #11)
 - [ ] First tagged release (`v0.1.0` — experimental)
 - [ ] Upstream PR draft to `std.crypto.sign.slh_dsa`
 
