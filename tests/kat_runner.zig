@@ -139,6 +139,50 @@ pub const RunSummary = struct {
 // We use std.json to parse generically and then post-process per-mode.
 // -----------------------------------------------------------------------------
 
+/// The vector file did not match the documented ACVP shape (missing
+/// field, wrong JSON type, or out-of-range value). Raised by the typed
+/// accessors below so malformed input surfaces as a controlled error
+/// instead of a safety panic in the JSON walk.
+pub const VectorFileError = error{MalformedVectorFile};
+
+/// Typed accessors over `std.json.Value`. ACVP files are external input;
+/// every field access in the walk goes through these rather than
+/// force-unwrapping unions.
+pub fn asObject(v: std.json.Value) VectorFileError!std.json.ObjectMap {
+    return switch (v) {
+        .object => |o| o,
+        else => error.MalformedVectorFile,
+    };
+}
+
+pub fn asArray(v: std.json.Value) VectorFileError!std.json.Array {
+    return switch (v) {
+        .array => |a| a,
+        else => error.MalformedVectorFile,
+    };
+}
+
+pub fn asString(v: std.json.Value) VectorFileError![]const u8 {
+    return switch (v) {
+        .string => |s| s,
+        else => error.MalformedVectorFile,
+    };
+}
+
+/// A tcId must be a non-negative JSON integer; anything else (including
+/// a negative value, which `std.json` can represent) is malformed.
+pub fn asTcId(v: std.json.Value) VectorFileError!u64 {
+    return switch (v) {
+        .integer => |i| if (i < 0) error.MalformedVectorFile else @intCast(i),
+        else => error.MalformedVectorFile,
+    };
+}
+
+/// Fetch a required field from an ACVP object.
+pub fn getField(obj: std.json.ObjectMap, name: []const u8) VectorFileError!std.json.Value {
+    return obj.get(name) orelse error.MalformedVectorFile;
+}
+
 /// Open a JSON vector file from disk and parse it into a `std.json.Value`.
 /// Caller frees the returned `Parsed` value.
 pub fn loadVectorsFromFile(
@@ -260,4 +304,29 @@ test "hexDecode round-trips" {
     const out = try hexDecode(std.testing.allocator, "DEADBEEF");
     defer std.testing.allocator.free(out);
     try std.testing.expectEqualSlices(u8, &[_]u8{ 0xDE, 0xAD, 0xBE, 0xEF }, out);
+}
+
+test "typed accessors reject wrong JSON types instead of panicking" {
+    const str_val = std.json.Value{ .string = "hello" };
+    const int_val = std.json.Value{ .integer = 42 };
+    const neg_val = std.json.Value{ .integer = -1 };
+
+    try std.testing.expectError(error.MalformedVectorFile, asObject(str_val));
+    try std.testing.expectError(error.MalformedVectorFile, asArray(str_val));
+    try std.testing.expectError(error.MalformedVectorFile, asString(int_val));
+    try std.testing.expectError(error.MalformedVectorFile, asTcId(str_val));
+    try std.testing.expectError(error.MalformedVectorFile, asTcId(neg_val));
+
+    try std.testing.expectEqualStrings("hello", try asString(str_val));
+    try std.testing.expectEqual(@as(u64, 42), try asTcId(int_val));
+}
+
+test "getField reports missing fields as malformed" {
+    var obj = std.json.ObjectMap.init(std.testing.allocator);
+    defer obj.deinit();
+    try obj.put("present", .{ .integer = 1 });
+
+    try std.testing.expectError(error.MalformedVectorFile, getField(obj, "absent"));
+    const got = try getField(obj, "present");
+    try std.testing.expectEqual(@as(i64, 1), got.integer);
 }

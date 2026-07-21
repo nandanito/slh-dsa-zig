@@ -92,6 +92,71 @@ fn parseArgs(args: []const [:0]const u8) !Args {
     return out;
 }
 
+/// Walk the parsed ACVP structure (testGroups -> tests), dispatch each
+/// vector, and accumulate a summary. All field accesses go through the
+/// typed accessors in kat_runner so malformed files produce
+/// `error.MalformedVectorFile` instead of a union-access panic.
+fn runVectors(
+    allocator: std.mem.Allocator,
+    root_value: std.json.Value,
+    mode: runner.VectorType,
+    param_set_filter: ?slh_dsa.ParamSet,
+) !runner.RunSummary {
+    var summary = runner.RunSummary{};
+
+    const root = try runner.asObject(root_value);
+    const groups = try runner.asArray(try runner.getField(root, "testGroups"));
+
+    for (groups.items) |group| {
+        const gobj = try runner.asObject(group);
+        const ps_name = try runner.asString(try runner.getField(gobj, "parameterSet"));
+        const tests = try runner.asArray(try runner.getField(gobj, "tests"));
+
+        const ps = runner.parseParamSet(ps_name) orelse {
+            std.debug.print("warning: unknown parameter set '{s}', skipping group\n", .{ps_name});
+            summary.skipped += @intCast(tests.items.len);
+            continue;
+        };
+        if (param_set_filter) |filter| {
+            if (ps != filter) continue;
+        }
+
+        for (tests.items) |tc| {
+            const tobj = try runner.asObject(tc);
+            const tc_id = try runner.asTcId(try runner.getField(tobj, "tcId"));
+
+            switch (mode) {
+                .key_gen => {
+                    const v = runner.KeyGenVector{
+                        .tc_id = tc_id,
+                        .param_set = ps,
+                        .sk_seed = try runner.hexDecode(allocator, try runner.asString(try runner.getField(tobj, "skSeed"))),
+                        .sk_prf = try runner.hexDecode(allocator, try runner.asString(try runner.getField(tobj, "skPrf"))),
+                        .pk_seed = try runner.hexDecode(allocator, try runner.asString(try runner.getField(tobj, "pkSeed"))),
+                        .expected_pk = try runner.hexDecode(allocator, try runner.asString(try runner.getField(tobj, "pk"))),
+                        .expected_sk = try runner.hexDecode(allocator, try runner.asString(try runner.getField(tobj, "sk"))),
+                    };
+                    const result = try runner.runKeyGen(allocator, v);
+                    summary.record(result);
+                    if (!result.pass) {
+                        std.debug.print("FAIL {s} tcId={d}: {s}\n", .{
+                            @tagName(result.param_set),
+                            result.tc_id,
+                            result.detail orelse "(no detail)",
+                        });
+                    }
+                },
+                .sig_gen, .sig_ver => {
+                    // Not implemented yet — counted as skipped, not failed.
+                    summary.skipped += 1;
+                },
+            }
+        }
+    }
+
+    return summary;
+}
+
 pub fn main(init: std.process.Init) !u8 {
     const allocator = init.arena.allocator();
     const args = try init.minimal.args.toSlice(allocator);
@@ -121,64 +186,12 @@ pub fn main(init: std.process.Init) !u8 {
     };
     defer parsed.deinit();
 
-    var summary = runner.RunSummary{};
-
-    const root = switch (parsed.value) {
-        .object => |o| o,
-        else => {
-            std.debug.print("error: vector file root is not a JSON object\n", .{});
-            return 1;
-        },
-    };
-    const groups = root.get("testGroups") orelse {
-        std.debug.print("error: no testGroups in vector file\n", .{});
+    const summary = runVectors(allocator, parsed.value, cli.mode.?, cli.param_set_filter) catch |err| {
+        // ACVP files are external input: any shape mismatch (or bad hex)
+        // lands here as a controlled failure rather than a safety panic.
+        std.debug.print("error: failed to process vector file: {s}\n", .{@errorName(err)});
         return 1;
     };
-
-    for (groups.array.items) |group| {
-        const gobj = group.object;
-        const ps_name = gobj.get("parameterSet").?.string;
-        const ps = runner.parseParamSet(ps_name) orelse {
-            std.debug.print("warning: unknown parameter set '{s}', skipping group\n", .{ps_name});
-            summary.skipped += @intCast(gobj.get("tests").?.array.items.len);
-            continue;
-        };
-        if (cli.param_set_filter) |filter| {
-            if (ps != filter) continue;
-        }
-
-        for (gobj.get("tests").?.array.items) |tc| {
-            const tobj = tc.object;
-            const tc_id: u64 = @intCast(tobj.get("tcId").?.integer);
-
-            switch (cli.mode.?) {
-                .key_gen => {
-                    const v = runner.KeyGenVector{
-                        .tc_id = tc_id,
-                        .param_set = ps,
-                        .sk_seed = try runner.hexDecode(allocator, tobj.get("skSeed").?.string),
-                        .sk_prf = try runner.hexDecode(allocator, tobj.get("skPrf").?.string),
-                        .pk_seed = try runner.hexDecode(allocator, tobj.get("pkSeed").?.string),
-                        .expected_pk = try runner.hexDecode(allocator, tobj.get("pk").?.string),
-                        .expected_sk = try runner.hexDecode(allocator, tobj.get("sk").?.string),
-                    };
-                    const result = try runner.runKeyGen(allocator, v);
-                    summary.record(result);
-                    if (!result.pass) {
-                        std.debug.print("FAIL {s} tcId={d}: {s}\n", .{
-                            @tagName(result.param_set),
-                            result.tc_id,
-                            result.detail orelse "(no detail)",
-                        });
-                    }
-                },
-                .sig_gen, .sig_ver => {
-                    // Not implemented yet — counted as skipped, not failed.
-                    summary.skipped += 1;
-                },
-            }
-        }
-    }
 
     std.debug.print("\nresults: total={d} passed={d} failed={d} skipped={d}\n", .{
         summary.total,
