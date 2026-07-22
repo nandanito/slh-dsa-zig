@@ -42,7 +42,7 @@ pub fn Fors(comptime p: params_mod.Params) type {
         pub const signature_bytes: usize = k * (a + 1) * n;
 
         // -----------------------------------------------------------------
-        // FIPS 205 §8.1 Algorithm 13 — fors_skGen(SK.seed, PK.seed, ADRS, idx).
+        // FIPS 205 §8.1 Algorithm 14 — fors_skGen(SK.seed, PK.seed, ADRS, idx).
         //
         // Computes the FORS secret-key element at index `idx` via PRF
         // with ADRS type FORS_PRF.
@@ -59,11 +59,11 @@ pub fn Fors(comptime p: params_mod.Params) type {
             _ = adrs;
             _ = idx;
             _ = out;
-            @panic("TODO: fors_skGen not implemented yet (FIPS 205 §8.1 Algorithm 13)");
+            @panic("TODO: fors_skGen not implemented yet (FIPS 205 §8.1 Algorithm 14)");
         }
 
         // -----------------------------------------------------------------
-        // FIPS 205 §8.2 Algorithm 14 — fors_node(SK.seed, i, z, PK.seed, ADRS).
+        // FIPS 205 §8.2 Algorithm 15 — fors_node(SK.seed, i, z, PK.seed, ADRS).
         //
         // Recursive node-value computation for a FORS Merkle tree. Same
         // structure as xmss_node: base case (z = 0) is F(PK.seed, ADRS,
@@ -83,11 +83,11 @@ pub fn Fors(comptime p: params_mod.Params) type {
             _ = pk_seed;
             _ = adrs;
             _ = out;
-            @panic("TODO: fors_node not implemented yet (FIPS 205 §8.2 Algorithm 14)");
+            @panic("TODO: fors_node not implemented yet (FIPS 205 §8.2 Algorithm 15)");
         }
 
         // -----------------------------------------------------------------
-        // FIPS 205 §8.3 Algorithm 15 — fors_sign(md, SK.seed, PK.seed, ADRS).
+        // FIPS 205 §8.3 Algorithm 16 — fors_sign(md, SK.seed, PK.seed, ADRS).
         //
         // Signs the message digest `md` (k * a bits, packed). Output is
         // `k` blocks of (revealed_leaf, auth_path_node_0, ..., auth_path_node_{a-1}),
@@ -105,11 +105,11 @@ pub fn Fors(comptime p: params_mod.Params) type {
             _ = pk_seed;
             _ = adrs;
             _ = out_sig;
-            @panic("TODO: fors_sign not implemented yet (FIPS 205 §8.3 Algorithm 15)");
+            @panic("TODO: fors_sign not implemented yet (FIPS 205 §8.3 Algorithm 16)");
         }
 
         // -----------------------------------------------------------------
-        // FIPS 205 §8.4 Algorithm 16 — fors_pkFromSig(sig, md, PK.seed, ADRS).
+        // FIPS 205 §8.4 Algorithm 17 — fors_pkFromSig(sig, md, PK.seed, ADRS).
         //
         // Reconstructs the FORS public key from a candidate signature
         // and the message digest. The caller passes this into the
@@ -127,7 +127,7 @@ pub fn Fors(comptime p: params_mod.Params) type {
             _ = pk_seed;
             _ = adrs;
             _ = out_pk;
-            @panic("TODO: fors_pkFromSig not implemented yet (FIPS 205 §8.4 Algorithm 16)");
+            @panic("TODO: fors_pkFromSig not implemented yet (FIPS 205 §8.4 Algorithm 17)");
         }
     };
 }

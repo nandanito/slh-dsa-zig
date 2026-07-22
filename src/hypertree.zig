@@ -31,7 +31,7 @@ pub fn Hypertree(comptime p: params_mod.Params) type {
         pub const signature_bytes: usize = d * Xmss.signature_bytes;
 
         // -----------------------------------------------------------------
-        // FIPS 205 §7.1 Algorithm 11 — ht_sign(M, SK.seed, PK.seed, idx_tree, idx_leaf).
+        // FIPS 205 §7.1 Algorithm 12 — ht_sign(M, SK.seed, PK.seed, idx_tree, idx_leaf).
         //
         // Signs message M with the hypertree. The bottom-layer XMSS tree
         // is selected by `idx_tree`, and within it leaf `idx_leaf` is used.
@@ -56,11 +56,11 @@ pub fn Hypertree(comptime p: params_mod.Params) type {
             _ = idx_tree;
             _ = idx_leaf;
             _ = out_sig;
-            @panic("TODO: ht_sign not implemented yet (FIPS 205 §7.1 Algorithm 11)");
+            @panic("TODO: ht_sign not implemented yet (FIPS 205 §7.1 Algorithm 12)");
         }
 
         // -----------------------------------------------------------------
-        // FIPS 205 §7.2 Algorithm 12 — ht_verify(M, sig, PK.seed, idx_tree, idx_leaf, PK.root).
+        // FIPS 205 §7.2 Algorithm 13 — ht_verify(M, sig, PK.seed, idx_tree, idx_leaf, PK.root).
         //
         // Verifies the hypertree signature by reconstructing roots layer
         // by layer using XMSS pkFromSig, and checking that the final root
@@ -80,7 +80,7 @@ pub fn Hypertree(comptime p: params_mod.Params) type {
             _ = idx_tree;
             _ = idx_leaf;
             _ = pk_root;
-            @panic("TODO: ht_verify not implemented yet (FIPS 205 §7.2 Algorithm 12)");
+            @panic("TODO: ht_verify not implemented yet (FIPS 205 §7.2 Algorithm 13)");
         }
     };
 }

@@ -44,7 +44,7 @@ pub fn Wots(comptime p: params_mod.Params) type {
         const Hash = hash_mod.Hash(p);
 
         // -----------------------------------------------------------------
-        // FIPS 205 §5.1 Algorithm 4 — chain(X, i, s, PK.seed, ADRS).
+        // FIPS 205 §5 Algorithm 5 — chain(X, i, s, PK.seed, ADRS).
         //
         // Chains the n-byte input X forward by s steps starting from
         // position i.
@@ -73,7 +73,7 @@ pub fn Wots(comptime p: params_mod.Params) type {
         }
 
         // -----------------------------------------------------------------
-        // FIPS 205 §5.2 Algorithm 5 — wots_PKgen(SK.seed, PK.seed, ADRS).
+        // FIPS 205 §5.1 Algorithm 6 — wots_PKgen(SK.seed, PK.seed, ADRS).
         //
         // Computes the WOTS+ public key by chaining each secret chain
         // origin to the end and then compressing the chain endpoints
@@ -113,7 +113,7 @@ pub fn Wots(comptime p: params_mod.Params) type {
         }
 
         // -----------------------------------------------------------------
-        // FIPS 205 §5.3 Algorithm 6 — wots_sign(M, SK.seed, PK.seed, ADRS).
+        // FIPS 205 §5.2 Algorithm 7 — wots_sign(M, SK.seed, PK.seed, ADRS).
         //
         // Signs a length-n message digest with WOTS+. Output is `len`
         // n-byte chain values.
@@ -130,11 +130,11 @@ pub fn Wots(comptime p: params_mod.Params) type {
             _ = pk_seed;
             _ = adrs;
             _ = out_sig;
-            @panic("TODO: WOTS+ sign not implemented yet (FIPS 205 §5.3 Algorithm 6)");
+            @panic("TODO: WOTS+ sign not implemented yet (FIPS 205 §5.2 Algorithm 7)");
         }
 
         // -----------------------------------------------------------------
-        // FIPS 205 §5.4 Algorithm 7 — wots_pkFromSig(sig, M, PK.seed, ADRS).
+        // FIPS 205 §5.3 Algorithm 8 — wots_pkFromSig(sig, M, PK.seed, ADRS).
         //
         // Reconstructs the WOTS+ public key from a candidate signature
         // and a message. The verifier uses this and compares against the
@@ -152,7 +152,7 @@ pub fn Wots(comptime p: params_mod.Params) type {
             _ = pk_seed;
             _ = adrs;
             _ = out_pk;
-            @panic("TODO: WOTS+ pkFromSig not implemented yet (FIPS 205 §5.4 Algorithm 7)");
+            @panic("TODO: WOTS+ pkFromSig not implemented yet (FIPS 205 §5.3 Algorithm 8)");
         }
     };
 }
@@ -174,7 +174,7 @@ test "chain: s = 0 is the identity" {
 }
 
 test "chain: composes — chain(x, 0, a+b) == chain(chain(x, 0, a), a, b)" {
-    // FIPS 205 §5.1: chaining is iterated F with the hash address tracking
+    // FIPS 205 §5: chaining is iterated F with the hash address tracking
     // the absolute position, so splitting the walk must not change the result.
     inline for (.{ params_mod.ParamSet.slh_dsa_shake_128f, params_mod.ParamSet.slh_dsa_sha2_128f }) |ps| {
         const p = comptime ps.params();

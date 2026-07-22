@@ -64,7 +64,7 @@ pub fn Slh_Dsa(comptime param_set: ParamSet) type {
         pub const Signature = [signature_length]u8;
 
         // -----------------------------------------------------------------
-        // FIPS 205 §9.1 Algorithm 17 — slh_keygen_internal(SK.seed, SK.prf, PK.seed).
+        // FIPS 205 §9.1 Algorithm 18 — slh_keygen_internal(SK.seed, SK.prf, PK.seed).
         // FIPS 205 §10.1 wraps this with random-bit sampling.
         //
         // For deterministic testing, callers can use `KeyPair.fromSeeds`;
@@ -78,7 +78,7 @@ pub fn Slh_Dsa(comptime param_set: ParamSet) type {
             /// Generate a fresh keypair from `io`'s CSPRNG.
             ///
             /// FIPS 205 §10.1 — slh_keygen: draw SK.seed, SK.prf, PK.seed
-            /// from an approved RBG, then derive via Algorithm 17.
+            /// from an approved RBG, then derive via Algorithm 18.
             ///
             /// Uses `Io.randomSecure` (fresh OS entropy, no fallback), not
             /// `Io.random`: the latter silently degrades to a best-effort
@@ -103,7 +103,7 @@ pub fn Slh_Dsa(comptime param_set: ParamSet) type {
             /// Used by KAT vectors and by callers who manage their own
             /// entropy.
             ///
-            /// FIPS 205 §9.1 Algorithm 17 — slh_keygen_internal:
+            /// FIPS 205 §9.1 Algorithm 18 — slh_keygen_internal:
             /// PK.root is the root of the top-layer XMSS tree (layer d-1,
             /// tree address 0), computed via xmss_node(SK.seed, 0, h', ...).
             pub fn fromSeeds(
@@ -133,7 +133,7 @@ pub fn Slh_Dsa(comptime param_set: ParamSet) type {
         };
 
         // -----------------------------------------------------------------
-        // FIPS 205 §9.2 Algorithm 18 — slh_sign_internal(M, SK, opt_rand).
+        // FIPS 205 §9.2 Algorithm 19 — slh_sign_internal(M, SK, opt_rand).
         // FIPS 205 §10.3 wraps with caller-supplied randomisation policy.
         //
         // Set `opt_rand` to a buffer of `params.n` bytes for randomised
@@ -157,7 +157,7 @@ pub fn Slh_Dsa(comptime param_set: ParamSet) type {
         }
 
         // -----------------------------------------------------------------
-        // FIPS 205 §9.3 Algorithm 19 — slh_verify_internal(M, sig, PK).
+        // FIPS 205 §9.3 Algorithm 20 — slh_verify_internal(M, sig, PK).
         // FIPS 205 §10.3 wrapper is the public verifier.
         //
         // Returns `error.InvalidSignature` on failure. The verifier is

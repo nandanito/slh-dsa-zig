@@ -29,7 +29,7 @@ pub fn Xmss(comptime p: params_mod.Params) type {
         pub const signature_bytes: usize = Wots.signature_bytes + h_prime * n;
 
         // -----------------------------------------------------------------
-        // FIPS 205 §6.1 Algorithm 8 — xmss_node(SK.seed, i, z, PK.seed, ADRS).
+        // FIPS 205 §6.1 Algorithm 9 — xmss_node(SK.seed, i, z, PK.seed, ADRS).
         //
         // Recursively computes the value of node `i` at height `z` in the
         // XMSS tree rooted at PK.seed. Base case (z = 0) is a WOTS+
@@ -74,7 +74,7 @@ pub fn Xmss(comptime p: params_mod.Params) type {
         }
 
         // -----------------------------------------------------------------
-        // FIPS 205 §6.2 Algorithm 9 — xmss_sign(M, SK.seed, idx, PK.seed, ADRS).
+        // FIPS 205 §6.2 Algorithm 10 — xmss_sign(M, SK.seed, idx, PK.seed, ADRS).
         //
         // Produces an XMSS signature on the n-byte message M with leaf
         // `idx`. Output is `signature_bytes` (= WOTS+ sig + h' auth nodes).
@@ -93,11 +93,11 @@ pub fn Xmss(comptime p: params_mod.Params) type {
             _ = pk_seed;
             _ = adrs;
             _ = out_sig;
-            @panic("TODO: xmss_sign not implemented yet (FIPS 205 §6.2 Algorithm 9)");
+            @panic("TODO: xmss_sign not implemented yet (FIPS 205 §6.2 Algorithm 10)");
         }
 
         // -----------------------------------------------------------------
-        // FIPS 205 §6.3 Algorithm 10 — xmss_pkFromSig(idx, sig, M, PK.seed, ADRS).
+        // FIPS 205 §6.3 Algorithm 11 — xmss_pkFromSig(idx, sig, M, PK.seed, ADRS).
         //
         // Reconstructs the XMSS root from a candidate signature, by
         // verifying the WOTS+ part to get the leaf and then climbing the
@@ -119,13 +119,13 @@ pub fn Xmss(comptime p: params_mod.Params) type {
             _ = pk_seed;
             _ = adrs;
             _ = out_root;
-            @panic("TODO: xmss_pkFromSig not implemented yet (FIPS 205 §6.3 Algorithm 10)");
+            @panic("TODO: xmss_pkFromSig not implemented yet (FIPS 205 §6.3 Algorithm 11)");
         }
     };
 }
 
 test "node: deterministic and equals H over its two children" {
-    // FIPS 205 §6.1 Algorithm 8 inductive case, checked by hand at z = 1:
+    // FIPS 205 §6.1 Algorithm 9 inductive case, checked by hand at z = 1:
     // node(i=0, z=1) must equal H(PK.seed, TREE-adrs(z=1, i=0), leaf_0, leaf_1).
     inline for (.{ params_mod.ParamSet.slh_dsa_shake_128f, params_mod.ParamSet.slh_dsa_sha2_128f }) |ps| {
         const p = comptime ps.params();
