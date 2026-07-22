@@ -44,8 +44,8 @@ post-quantum cryptography effort in Zig, and the direct successor to
 | ADRS structure | FIPS 205 §4.3, §11.2 (ADRSc) | ✅ Implemented |
 | WOTS+ | FIPS 205 §5 | ✅ `chain`, `pkGen`, `sign`, `pkFromSig` (property-tested) |
 | XMSS | FIPS 205 §6 | ✅ `node`, `sign`, `pkFromSig` (property-tested) |
-| Hypertree | FIPS 205 §7 | 🚧 Skeleton |
-| FORS | FIPS 205 §8 | 🚧 Skeleton |
+| Hypertree | FIPS 205 §7 | ✅ `ht_sign`, `ht_verify` (property-tested) |
+| FORS | FIPS 205 §8 | ✅ `skGen`, `node`, `sign`, `pkFromSig` (property-tested) |
 | SLH-DSA key generation | FIPS 205 §9.1, §10.1 | ✅ ACVP keyGen KATs pass (120/120, all 12 sets) |
 | SLH-DSA sign / verify | FIPS 205 §9.2–9.3, §10 | 🚧 Skeleton |
 | NIST ACVP KAT runner | — | 🚧 keyGen mode ✅ · sigGen/sigVer pending |
@@ -58,9 +58,10 @@ Legend: ✅ implemented and tested · 🚧 skeleton / in progress · ⏳ planned
 Key generation is implemented end-to-end and passes the NIST ACVP keyGen vectors for all 12
 parameter sets — which also exercises both hash-adapter families, the ADRS encodings, WOTS+
 public-key generation, and XMSS tree hashing against external ground truth. The signing
-path (WOTS+/XMSS sign, hypertree, FORS, top-level sign/verify) consists of stubs that
-`@panic` with the FIPS 205 section reference until they are filled in under the discipline
-described below.
+primitives — WOTS+/XMSS sign, the hypertree, and FORS — are now implemented and validated by
+spec-derived property tests against that KAT-validated key generation. Only the top-level
+`slh_sign` / `slh_verify` (§9.2–9.3, §10) remain stubbed, pending the context-string API
+decision (issue #8); once they land, the ACVP sigGen/sigVer vectors become wireable.
 
 ## Parameter sets
 
@@ -207,8 +208,8 @@ arrives as early as possible (see issue #7):
 
 - [x] WOTS+ `sign` + `pkFromSig` (FIPS 205 §5.2–5.3)
 - [x] XMSS `sign` + `pkFromSig` (FIPS 205 §6.2–6.3)
-- [ ] Hypertree signing and verification (FIPS 205 §7)
-- [ ] FORS signing and verification (FIPS 205 §8)
+- [x] Hypertree signing and verification (FIPS 205 §7)
+- [x] FORS signing and verification (FIPS 205 §8)
 - [ ] Context-string API decision (issue #8) + top-level `slh_sign`, `slh_verify`
 - [ ] **NIST ACVP sigGen + sigVer KAT pass, all 12 parameter sets**
 
