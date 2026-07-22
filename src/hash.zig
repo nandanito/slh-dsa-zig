@@ -30,11 +30,11 @@ pub fn Hash(comptime p: params_mod.Params) type {
 //   PRF      (sk_seed: *const [n]u8, pk_seed: *const [n]u8, adrs: *const Adrs,
 //             out: *[n]u8) void
 //
-//   PRF_msg  (sk_prf: *const [n]u8, opt_rand: *const [n]u8, msg: []const u8,
-//             out: *[n]u8) void
+//   PRF_msg  (sk_prf: *const [n]u8, opt_rand: *const [n]u8,
+//             msg_parts: []const []const u8, out: *[n]u8) void
 //
 //   H_msg    (rand: *const [n]u8, pk_seed: *const [n]u8, pk_root: *const [n]u8,
-//             msg: []const u8, out: *[m]u8) void
+//             msg_parts: []const []const u8, out: *[m]u8) void
 //
 //   F        (pk_seed: *const [n]u8, adrs: *const Adrs, msg: *const [n]u8,
 //             out: *[n]u8) void

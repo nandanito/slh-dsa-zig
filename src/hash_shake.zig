@@ -55,17 +55,20 @@ pub fn ShakeAdapter(comptime p: params_mod.Params) type {
         ///
         /// PRF_msg(SK.prf, opt_rand, M) = SHAKE256(SK.prf || opt_rand || M, 8n).
         ///
-        /// `sk_prf` is secret; absorbed directly. Constant-time.
+        /// The message M is absorbed as an ordered sequence of parts so the
+        /// §10.2 context prefix can be prepended without copying an
+        /// arbitrary-length message. `sk_prf` is secret; absorbed directly.
+        /// Constant-time.
         pub fn prf_msg(
             sk_prf: *const [n]u8,
             opt_rand: *const [n]u8,
-            msg: []const u8,
+            msg_parts: []const []const u8,
             out: *[n]u8,
         ) void {
             var st = Shake256.init(.{});
             st.update(sk_prf);
             st.update(opt_rand);
-            st.update(msg);
+            for (msg_parts) |part| st.update(part);
             st.final(out);
             // `st` absorbed SK.prf; scrub the state for the same reason as PRF.
             std.crypto.secureZero(u8, std.mem.asBytes(&st));
@@ -74,19 +77,20 @@ pub fn ShakeAdapter(comptime p: params_mod.Params) type {
         /// FIPS 205 §11.1 — H_msg.
         ///
         /// H_msg(R, PK.seed, PK.root, M) = SHAKE256(R || PK.seed || PK.root || M, 8m).
-        /// All inputs are public (R is the per-signature randomiser).
+        /// M is absorbed as an ordered sequence of parts (see prf_msg). All
+        /// inputs are public (R is the per-signature randomiser).
         pub fn h_msg(
             rand: *const [n]u8,
             pk_seed: *const [n]u8,
             pk_root: *const [n]u8,
-            msg: []const u8,
+            msg_parts: []const []const u8,
             out: *[m]u8,
         ) void {
             var st = Shake256.init(.{});
             st.update(rand);
             st.update(pk_seed);
             st.update(pk_root);
-            st.update(msg);
+            for (msg_parts) |part| st.update(part);
             st.final(out);
         }
 
@@ -279,7 +283,7 @@ test "shake PRF_msg: matches single-shot SHAKE256 of SK.prf || opt_rand || M" {
     const msg = "the quick brown fox";
 
     var got: [n]u8 = undefined;
-    A.prf_msg(&sk_prf, &opt_rand, msg, &got);
+    A.prf_msg(&sk_prf, &opt_rand, &.{msg}, &got);
 
     var concat: [2 * n + msg.len]u8 = undefined;
     @memcpy(concat[0..n], &sk_prf);
@@ -305,7 +309,7 @@ test "shake H_msg: matches single-shot SHAKE256 of R || PK.seed || PK.root || M,
     const msg = "FIPS 205 H_msg layout check";
 
     var got: [m]u8 = undefined;
-    A.h_msg(&rand, &pk_seed, &pk_root, msg, &got);
+    A.h_msg(&rand, &pk_seed, &pk_root, &.{msg}, &got);
 
     var concat: [3 * n + msg.len]u8 = undefined;
     @memcpy(concat[0..n], &rand);
