@@ -17,8 +17,12 @@
 //! Lane: this file is Lane A. It is test infrastructure, not crypto core,
 //! and is intentionally not in the upstream-candidate tree.
 //!
-//! Status: keyGen is fully wired; sigGen/sigVer executors return
-//! "not implemented" until the corresponding scheme bodies land.
+//! Status: keyGen, sigGen, and sigVer are fully wired. sigGen drives the
+//! §9.2 internal signer (`signInternal`) and the §10.2 external signer
+//! (`signWithContext`, context-string domain separation); sigVer drives
+//! §9.3 / §10.3. HashSLH-DSA pre-hash groups (`preHash` other than "none" /
+//! "pure") are out of scope — deferred per issue #8 — and skipped by the
+//! CLI walker in `kat_main.zig`.
 
 const std = @import("std");
 const slh_dsa = @import("slh_dsa");
@@ -33,6 +37,25 @@ pub const VectorType = enum {
         if (std.mem.eql(u8, s, "keyGen")) return .key_gen;
         if (std.mem.eql(u8, s, "sigGen")) return .sig_gen;
         if (std.mem.eql(u8, s, "sigVer")) return .sig_ver;
+        return null;
+    }
+};
+
+/// ACVP `signatureInterface` for the sigGen/sigVer modes.
+///
+///   - internal : sign/verify M directly (FIPS 205 §9.2 / §9.3).
+///   - external : prepend the domain separator + context string
+///                (FIPS 205 §10.2 / §10.3).
+///
+/// The HashSLH-DSA pre-hash variant (`preHash: "preHash"`) is a third axis
+/// handled by the group walker, which skips it (out of scope, issue #8).
+pub const Interface = enum {
+    internal,
+    external,
+
+    pub fn fromString(s: []const u8) ?Interface {
+        if (std.mem.eql(u8, s, "internal")) return .internal;
+        if (std.mem.eql(u8, s, "external")) return .external;
         return null;
     }
 };
@@ -74,9 +97,14 @@ pub const KeyGenVector = struct {
 pub const SigGenVector = struct {
     tc_id: u64,
     param_set: slh_dsa.ParamSet,
+    interface: Interface,
     sk: []u8,
     msg: []u8,
-    /// `null` for deterministic signing.
+    /// Context string for the external interface (may be empty); `null` for
+    /// the internal interface, which has no context.
+    ctx: ?[]u8,
+    /// The per-signature randomiser (`additionalRandomness`), `null` for
+    /// deterministic signing (opt_rand defaults to PK.seed per FIPS 205 §9.2).
     opt_rand: ?[]u8,
     expected_sig: []u8,
 };
@@ -85,8 +113,12 @@ pub const SigGenVector = struct {
 pub const SigVerVector = struct {
     tc_id: u64,
     param_set: slh_dsa.ParamSet,
+    interface: Interface,
     pk: []u8,
     msg: []u8,
+    /// Context string for the external interface (may be empty); `null` for
+    /// the internal interface.
+    ctx: ?[]u8,
     sig: []u8,
     expected_accept: bool,
 };
@@ -165,6 +197,15 @@ pub fn asArray(v: std.json.Value) VectorFileError!std.json.Array {
 pub fn asString(v: std.json.Value) VectorFileError![]const u8 {
     return switch (v) {
         .string => |s| s,
+        else => error.MalformedVectorFile,
+    };
+}
+
+/// The sigVer `testPassed` field is a JSON boolean; anything else is
+/// malformed.
+pub fn asBool(v: std.json.Value) VectorFileError!bool {
+    return switch (v) {
+        .bool => |b| b,
         else => error.MalformedVectorFile,
     };
 }
@@ -252,20 +293,92 @@ pub fn runKeyGen(
     }
 }
 
-pub fn runSigGen(
-    _: std.mem.Allocator,
-    v: SigGenVector,
+/// Build a failing `VectorResult` with an allocated diagnostic string.
+/// The caller owns `detail`.
+fn fail(
+    allocator: std.mem.Allocator,
+    tc_id: u64,
+    param_set: slh_dsa.ParamSet,
+    comptime fmt: []const u8,
+    args: anytype,
 ) !VectorResult {
-    // TODO: instantiate Slh_Dsa, call sign, compare expected_sig.
-    return .{ .tc_id = v.tc_id, .param_set = v.param_set, .pass = false, .detail = "skeleton: sign not implemented" };
+    return .{
+        .tc_id = tc_id,
+        .param_set = param_set,
+        .pass = false,
+        .detail = try std.fmt.allocPrint(allocator, fmt, args),
+    };
 }
 
+/// FIPS 205 §9.2 / §10.2 — sign `v.msg` and compare against the ACVP
+/// expected signature byte-for-byte. `v.interface` selects the internal
+/// signer (M direct) or the external signer (context-string prefix); a
+/// present `v.opt_rand` selects randomised signing, `null` deterministic.
+pub fn runSigGen(
+    allocator: std.mem.Allocator,
+    v: SigGenVector,
+) !VectorResult {
+    switch (v.param_set) {
+        inline else => |ps| {
+            const S = slh_dsa.Slh_Dsa(ps);
+            const n = S.params.n;
+
+            if (v.sk.len != S.secret_key_length)
+                return fail(allocator, v.tc_id, v.param_set, "sk length {d}, expected {d}", .{ v.sk.len, S.secret_key_length });
+            if (v.expected_sig.len != S.signature_length)
+                return fail(allocator, v.tc_id, v.param_set, "expected signature length {d}, expected {d}", .{ v.expected_sig.len, S.signature_length });
+            if (v.opt_rand) |r| {
+                if (r.len != n)
+                    return fail(allocator, v.tc_id, v.param_set, "additionalRandomness length {d}, expected {d}", .{ r.len, n });
+            }
+
+            const sk: *const S.SecretKey = v.sk[0..S.secret_key_length];
+            const opt_rand: ?*const [n]u8 = if (v.opt_rand) |r| r[0..n] else null;
+
+            var sig: S.Signature = undefined;
+            switch (v.interface) {
+                .internal => S.signInternal(&sig, v.msg, sk, opt_rand),
+                .external => S.signWithContext(&sig, v.msg, v.ctx orelse "", sk, opt_rand) catch |err|
+                    return fail(allocator, v.tc_id, v.param_set, "signWithContext failed: {s}", .{@errorName(err)}),
+            }
+
+            if (std.mem.eql(u8, &sig, v.expected_sig))
+                return .{ .tc_id = v.tc_id, .param_set = v.param_set, .pass = true };
+            return fail(allocator, v.tc_id, v.param_set, "signature mismatch ({s} interface)", .{@tagName(v.interface)});
+        },
+    }
+}
+
+/// FIPS 205 §9.3 / §10.3 — verify `v.sig` over `v.msg` and check the
+/// accept/reject decision against the ACVP `testPassed` expectation. A
+/// wrong-length public key or signature (ACVP's "too large" / "too small"
+/// negatives) cannot form the fixed-size arrays the API takes, so it is a
+/// rejection rather than a runner error.
 pub fn runSigVer(
-    _: std.mem.Allocator,
+    allocator: std.mem.Allocator,
     v: SigVerVector,
 ) !VectorResult {
-    // TODO: instantiate Slh_Dsa, call verify, compare against expected_accept.
-    return .{ .tc_id = v.tc_id, .param_set = v.param_set, .pass = false, .detail = "skeleton: verify not implemented" };
+    switch (v.param_set) {
+        inline else => |ps| {
+            const S = slh_dsa.Slh_Dsa(ps);
+
+            const accepted = blk: {
+                if (v.pk.len != S.public_key_length or v.sig.len != S.signature_length)
+                    break :blk false;
+                const pk: *const S.PublicKey = v.pk[0..S.public_key_length];
+                const sig: *const S.Signature = v.sig[0..S.signature_length];
+                const res = switch (v.interface) {
+                    .internal => S.verifyInternal(sig, v.msg, pk),
+                    .external => S.verifyWithContext(sig, v.msg, v.ctx orelse "", pk),
+                };
+                break :blk if (res) |_| true else |_| false;
+            };
+
+            if (accepted == v.expected_accept)
+                return .{ .tc_id = v.tc_id, .param_set = v.param_set, .pass = true };
+            return fail(allocator, v.tc_id, v.param_set, "verify accepted={}, expected accepted={} ({s} interface)", .{ accepted, v.expected_accept, @tagName(v.interface) });
+        },
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -300,6 +413,13 @@ test "VectorType.fromString" {
     try std.testing.expectEqual(@as(?VectorType, null), VectorType.fromString("garbage"));
 }
 
+test "Interface.fromString" {
+    try std.testing.expectEqual(@as(?Interface, .internal), Interface.fromString("internal"));
+    try std.testing.expectEqual(@as(?Interface, .external), Interface.fromString("external"));
+    try std.testing.expectEqual(@as(?Interface, null), Interface.fromString("preHash"));
+    try std.testing.expectEqual(@as(?Interface, null), Interface.fromString(""));
+}
+
 test "hexDecode round-trips" {
     const out = try hexDecode(std.testing.allocator, "DEADBEEF");
     defer std.testing.allocator.free(out);
@@ -316,17 +436,158 @@ test "typed accessors reject wrong JSON types instead of panicking" {
     try std.testing.expectError(error.MalformedVectorFile, asString(int_val));
     try std.testing.expectError(error.MalformedVectorFile, asTcId(str_val));
     try std.testing.expectError(error.MalformedVectorFile, asTcId(neg_val));
+    try std.testing.expectError(error.MalformedVectorFile, asBool(int_val));
 
     try std.testing.expectEqualStrings("hello", try asString(str_val));
     try std.testing.expectEqual(@as(u64, 42), try asTcId(int_val));
+    try std.testing.expectEqual(true, try asBool(.{ .bool = true }));
+    try std.testing.expectEqual(false, try asBool(.{ .bool = false }));
 }
 
 test "getField reports missing fields as malformed" {
-    var obj = std.json.ObjectMap.init(std.testing.allocator);
-    defer obj.deinit();
-    try obj.put("present", .{ .integer = 1 });
+    var parsed = try std.json.parseFromSlice(std.json.Value, std.testing.allocator, "{\"present\":1}", .{});
+    defer parsed.deinit();
+    const obj = try asObject(parsed.value);
 
     try std.testing.expectError(error.MalformedVectorFile, getField(obj, "absent"));
     const got = try getField(obj, "present");
     try std.testing.expectEqual(@as(i64, 1), got.integer);
+}
+
+test "sigGen/sigVer executors: interface dispatch + accept/reject plumbing" {
+    // Self-contained smoke test of the executor plumbing — interface
+    // dispatch, deterministic vs randomised, context handling, and the
+    // wrong-length-signature rejection path — without needing external ACVP
+    // files. The library is its own oracle here: sign, then feed the
+    // produced signature back through the executors. Byte-exact validation
+    // against NIST's expected outputs is the job of `zig build kat`
+    // (issue #25); this only guards the runner glue on a fast parameter set.
+    const S = slh_dsa.Slh_Dsa(.slh_dsa_shake_128f);
+    const ps = slh_dsa.ParamSet.slh_dsa_shake_128f;
+    const n = S.params.n;
+
+    var sk_seed: [n]u8 = undefined;
+    var sk_prf: [n]u8 = undefined;
+    var pk_seed: [n]u8 = undefined;
+    for (&sk_seed, 0..) |*b, i| b.* = @intCast(0x11 + i);
+    for (&sk_prf, 0..) |*b, i| b.* = @intCast(0x55 + i);
+    for (&pk_seed, 0..) |*b, i| b.* = @intCast(0x99 + i);
+    const kp = try S.KeyPair.fromSeeds(&sk_seed, &sk_prf, &pk_seed);
+
+    var sk = kp.secret_key;
+    var pk = kp.public_key;
+    var msg = [_]u8{ 0xDE, 0xAD, 0xBE, 0xEF };
+    var ctx = [_]u8{ 0x01, 0x02, 0x03 };
+
+    // internal, deterministic (opt_rand = null): sigGen must reproduce the
+    // signature and sigVer must accept it.
+    var sig_int: S.Signature = undefined;
+    S.signInternal(&sig_int, &msg, &sk, null);
+    {
+        const gen = try runSigGen(std.testing.allocator, .{
+            .tc_id = 1,
+            .param_set = ps,
+            .interface = .internal,
+            .sk = sk[0..],
+            .msg = msg[0..],
+            .ctx = null,
+            .opt_rand = null,
+            .expected_sig = sig_int[0..],
+        });
+        try std.testing.expect(gen.pass);
+
+        const ver = try runSigVer(std.testing.allocator, .{
+            .tc_id = 1,
+            .param_set = ps,
+            .interface = .internal,
+            .pk = pk[0..],
+            .msg = msg[0..],
+            .ctx = null,
+            .sig = sig_int[0..],
+            .expected_accept = true,
+        });
+        try std.testing.expect(ver.pass);
+    }
+
+    // external, randomised, non-empty context.
+    var rnd: [n]u8 = undefined;
+    for (&rnd, 0..) |*b, i| b.* = @intCast(0xE1 ^ i);
+    var sig_ext: S.Signature = undefined;
+    try S.signWithContext(&sig_ext, &msg, &ctx, &sk, &rnd);
+    {
+        const gen = try runSigGen(std.testing.allocator, .{
+            .tc_id = 2,
+            .param_set = ps,
+            .interface = .external,
+            .sk = sk[0..],
+            .msg = msg[0..],
+            .ctx = ctx[0..],
+            .opt_rand = rnd[0..],
+            .expected_sig = sig_ext[0..],
+        });
+        try std.testing.expect(gen.pass);
+
+        const ver = try runSigVer(std.testing.allocator, .{
+            .tc_id = 2,
+            .param_set = ps,
+            .interface = .external,
+            .pk = pk[0..],
+            .msg = msg[0..],
+            .ctx = ctx[0..],
+            .sig = sig_ext[0..],
+            .expected_accept = true,
+        });
+        try std.testing.expect(ver.pass);
+    }
+
+    // sigVer negatives: a tampered signature with an expected reject must be
+    // *scored* as a pass (the executor checks accept == expected).
+    var tampered = sig_int;
+    tampered[0] ^= 0x01;
+    {
+        const ver = try runSigVer(std.testing.allocator, .{
+            .tc_id = 3,
+            .param_set = ps,
+            .interface = .internal,
+            .pk = pk[0..],
+            .msg = msg[0..],
+            .ctx = null,
+            .sig = tampered[0..],
+            .expected_accept = false,
+        });
+        try std.testing.expect(ver.pass);
+    }
+
+    // A truncated signature (ACVP "invalid signature - too small") is a
+    // rejection, handled without forming the fixed-size array or crashing.
+    {
+        const ver = try runSigVer(std.testing.allocator, .{
+            .tc_id = 4,
+            .param_set = ps,
+            .interface = .internal,
+            .pk = pk[0..],
+            .msg = msg[0..],
+            .ctx = null,
+            .sig = sig_int[0 .. sig_int.len - 1],
+            .expected_accept = false,
+        });
+        try std.testing.expect(ver.pass);
+    }
+
+    // A genuine mismatch produces a failing result with a heap-allocated
+    // diagnostic — verify the failure path and free the detail.
+    {
+        const gen = try runSigGen(std.testing.allocator, .{
+            .tc_id = 5,
+            .param_set = ps,
+            .interface = .external,
+            .sk = sk[0..],
+            .msg = msg[0..],
+            .ctx = ctx[0..],
+            .opt_rand = null, // deterministic external ≠ the randomised sig_ext
+            .expected_sig = sig_ext[0..],
+        });
+        try std.testing.expect(!gen.pass);
+        if (gen.detail) |d| std.testing.allocator.free(d);
+    }
 }

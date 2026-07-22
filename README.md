@@ -47,8 +47,8 @@ post-quantum cryptography effort in Zig, and the direct successor to
 | Hypertree | FIPS 205 §7 | ✅ `ht_sign`, `ht_verify` (property-tested) |
 | FORS | FIPS 205 §8 | ✅ `skGen`, `node`, `sign`, `pkFromSig` (property-tested) |
 | SLH-DSA key generation | FIPS 205 §9.1, §10.1 | ✅ ACVP keyGen KATs pass (120/120, all 12 sets) |
-| SLH-DSA sign / verify | FIPS 205 §9.2–9.3, §10 | ✅ pure + context (property-tested) · pre-hash deferred |
-| NIST ACVP KAT runner | — | 🚧 keyGen mode ✅ · sigGen/sigVer pending |
+| SLH-DSA sign / verify | FIPS 205 §9.2–9.3, §10 | ✅ ACVP sigGen/sigVer KATs pass (all 12 sets, internal + external) · pre-hash deferred |
+| NIST ACVP KAT runner | — | ✅ keyGen · sigGen · sigVer modes (pre-hash groups skipped) |
 | Benchmarks vs PQClean | — | 🚧 Skeleton |
 | Constant-time verification | ctgrind / valgrind | ⏳ Planned |
 | Fuzz harnesses | std.testing.fuzz | ⏳ Planned |
@@ -59,10 +59,12 @@ Key generation is implemented end-to-end and passes the NIST ACVP keyGen vectors
 parameter sets — which also exercises both hash-adapter families, the ADRS encodings, WOTS+
 public-key generation, and XMSS tree hashing against external ground truth. The full signing
 chain — WOTS+/XMSS sign, the hypertree, FORS, and the top-level `slh_sign` / `slh_verify`
-(pure SLH-DSA with context strings, §9.2–9.3/§10.2–10.3) — is now implemented and validated
-by spec-derived property tests against that KAT-validated key generation. The remaining
-Milestone 2 work is wiring the ACVP sigGen/sigVer vectors — the formal exit gate (issue #25).
-The HashSLH-DSA pre-hash variants are deferred by decision (issue #8).
+(pure SLH-DSA with context strings, §9.2–9.3/§10.2–10.3) — is implemented and validated
+against the NIST ACVP sigGen/sigVer vectors: sigGen reproduces the expected signatures
+byte-for-byte and sigVer matches every accept/reject decision across all 12 parameter sets,
+for both the internal and external (context-string) interfaces. That closes the formal
+Milestone 2 exit gate (issue #25). The HashSLH-DSA pre-hash variants are deferred by decision
+(issue #8), so those ACVP groups are skipped.
 
 ## Parameter sets
 
@@ -218,7 +220,7 @@ arrives as early as possible (see issue #7):
 - [x] Hypertree signing and verification (FIPS 205 §7)
 - [x] FORS signing and verification (FIPS 205 §8)
 - [x] Context-string API decision (issue #8) + top-level `slh_sign`, `slh_verify`
-- [ ] **NIST ACVP sigGen + sigVer KAT pass, all 12 parameter sets** (issue #25)
+- [x] **NIST ACVP sigGen + sigVer KAT pass, all 12 parameter sets** (issue #25)
 
 **Milestone 3 — hardening and release:**
 

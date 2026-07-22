@@ -24,6 +24,15 @@ const std = @import("std");
 const runner = @import("kat_runner.zig");
 const slh_dsa = @import("slh_dsa");
 
+test {
+    // Pull the KAT runner's own unit tests into this module's test binary.
+    // `zig test` only runs tests from files reachable via an explicit
+    // reference, so importing `kat_runner` for its decls above is not enough
+    // — this reference forces its `test` blocks (typed accessors, param-set
+    // and interface parsing, executor plumbing) to run under `zig build test`.
+    _ = @import("kat_runner.zig");
+}
+
 const Args = struct {
     mode: ?runner.VectorType = null,
     vectors_path: ?[]const u8 = null,
@@ -92,6 +101,32 @@ fn parseArgs(args: []const [:0]const u8) !Args {
     return out;
 }
 
+/// Decode an optional hex field: absent → `null`, present → decoded bytes.
+/// Used for ACVP fields that only appear in some groups — e.g.
+/// `additionalRandomness`, which is present only for non-deterministic
+/// sigGen groups.
+fn optHex(
+    allocator: std.mem.Allocator,
+    obj: std.json.ObjectMap,
+    name: []const u8,
+) !?[]u8 {
+    const v = obj.get(name) orelse return null;
+    return try runner.hexDecode(allocator, try runner.asString(v));
+}
+
+/// The context string is present (possibly empty) for the external
+/// interface and absent for the internal one. Decodes it accordingly.
+fn optContext(
+    allocator: std.mem.Allocator,
+    obj: std.json.ObjectMap,
+    interface: runner.Interface,
+) !?[]u8 {
+    return switch (interface) {
+        .internal => null,
+        .external => try runner.hexDecode(allocator, try runner.asString(try runner.getField(obj, "context"))),
+    };
+}
+
 /// Walk the parsed ACVP structure (testGroups -> tests), dispatch each
 /// vector, and accumulate a summary. All field accesses go through the
 /// typed accessors in kat_runner so malformed files produce
@@ -121,35 +156,68 @@ fn runVectors(
             if (ps != filter) continue;
         }
 
+        // Signature modes carry two extra group-level axes: the signature
+        // interface (internal vs external) and the pre-hash mode. HashSLH-DSA
+        // pre-hash groups are out of scope (issue #8) and skipped wholesale;
+        // pure/none groups run against the internal or external signer.
+        var interface: runner.Interface = .internal;
+        if (mode == .sig_gen or mode == .sig_ver) {
+            const pre_hash = try runner.asString(try runner.getField(gobj, "preHash"));
+            if (std.mem.eql(u8, pre_hash, "preHash")) {
+                summary.skipped += @intCast(tests.items.len);
+                continue;
+            }
+            const iface_name = try runner.asString(try runner.getField(gobj, "signatureInterface"));
+            interface = runner.Interface.fromString(iface_name) orelse {
+                std.debug.print("warning: unknown signatureInterface '{s}', skipping group\n", .{iface_name});
+                summary.skipped += @intCast(tests.items.len);
+                continue;
+            };
+        }
+
         for (tests.items) |tc| {
             const tobj = try runner.asObject(tc);
             const tc_id = try runner.asTcId(try runner.getField(tobj, "tcId"));
 
-            switch (mode) {
-                .key_gen => {
-                    const v = runner.KeyGenVector{
-                        .tc_id = tc_id,
-                        .param_set = ps,
-                        .sk_seed = try runner.hexDecode(allocator, try runner.asString(try runner.getField(tobj, "skSeed"))),
-                        .sk_prf = try runner.hexDecode(allocator, try runner.asString(try runner.getField(tobj, "skPrf"))),
-                        .pk_seed = try runner.hexDecode(allocator, try runner.asString(try runner.getField(tobj, "pkSeed"))),
-                        .expected_pk = try runner.hexDecode(allocator, try runner.asString(try runner.getField(tobj, "pk"))),
-                        .expected_sk = try runner.hexDecode(allocator, try runner.asString(try runner.getField(tobj, "sk"))),
-                    };
-                    const result = try runner.runKeyGen(allocator, v);
-                    summary.record(result);
-                    if (!result.pass) {
-                        std.debug.print("FAIL {s} tcId={d}: {s}\n", .{
-                            @tagName(result.param_set),
-                            result.tc_id,
-                            result.detail orelse "(no detail)",
-                        });
-                    }
-                },
-                .sig_gen, .sig_ver => {
-                    // Not implemented yet — counted as skipped, not failed.
-                    summary.skipped += 1;
-                },
+            const result: runner.VectorResult = switch (mode) {
+                .key_gen => try runner.runKeyGen(allocator, .{
+                    .tc_id = tc_id,
+                    .param_set = ps,
+                    .sk_seed = try runner.hexDecode(allocator, try runner.asString(try runner.getField(tobj, "skSeed"))),
+                    .sk_prf = try runner.hexDecode(allocator, try runner.asString(try runner.getField(tobj, "skPrf"))),
+                    .pk_seed = try runner.hexDecode(allocator, try runner.asString(try runner.getField(tobj, "pkSeed"))),
+                    .expected_pk = try runner.hexDecode(allocator, try runner.asString(try runner.getField(tobj, "pk"))),
+                    .expected_sk = try runner.hexDecode(allocator, try runner.asString(try runner.getField(tobj, "sk"))),
+                }),
+                .sig_gen => try runner.runSigGen(allocator, .{
+                    .tc_id = tc_id,
+                    .param_set = ps,
+                    .interface = interface,
+                    .sk = try runner.hexDecode(allocator, try runner.asString(try runner.getField(tobj, "sk"))),
+                    .msg = try runner.hexDecode(allocator, try runner.asString(try runner.getField(tobj, "message"))),
+                    .ctx = try optContext(allocator, tobj, interface),
+                    .opt_rand = try optHex(allocator, tobj, "additionalRandomness"),
+                    .expected_sig = try runner.hexDecode(allocator, try runner.asString(try runner.getField(tobj, "signature"))),
+                }),
+                .sig_ver => try runner.runSigVer(allocator, .{
+                    .tc_id = tc_id,
+                    .param_set = ps,
+                    .interface = interface,
+                    .pk = try runner.hexDecode(allocator, try runner.asString(try runner.getField(tobj, "pk"))),
+                    .msg = try runner.hexDecode(allocator, try runner.asString(try runner.getField(tobj, "message"))),
+                    .ctx = try optContext(allocator, tobj, interface),
+                    .sig = try runner.hexDecode(allocator, try runner.asString(try runner.getField(tobj, "signature"))),
+                    .expected_accept = try runner.asBool(try runner.getField(tobj, "testPassed")),
+                }),
+            };
+
+            summary.record(result);
+            if (!result.pass) {
+                std.debug.print("FAIL {s} tcId={d}: {s}\n", .{
+                    @tagName(result.param_set),
+                    result.tc_id,
+                    result.detail orelse "(no detail)",
+                });
             }
         }
     }
@@ -176,8 +244,8 @@ pub fn main(init: std.process.Init) !u8 {
     // -----------------------------------------------------------------
     // Load and dispatch.
     //
-    // keyGen is fully wired. sigGen/sigVer are counted as skipped until
-    // sign/verify land.
+    // keyGen, sigGen, and sigVer are all wired. HashSLH-DSA pre-hash groups
+    // (issue #8) are skipped by the walker and reported under `skipped`.
     // -----------------------------------------------------------------
 
     var parsed = runner.loadVectorsFromFile(init.io, allocator, cli.vectors_path.?) catch |err| {

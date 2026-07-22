@@ -70,6 +70,16 @@ pub fn build(b: *std.Build) void {
     const kat_step = b.step("kat", "Run NIST ACVP KAT vectors");
     kat_step.dependOn(&run_kat.step);
 
+    // The KAT runner/CLI carries its own unit tests (typed ACVP accessors,
+    // parameter-set + interface parsing, executor plumbing) that live under
+    // tests/ rather than in the library module. Fold them into `zig build
+    // test` so they run in CI alongside the library suite.
+    const kat_tests = b.addTest(.{
+        .root_module = kat_mod,
+    });
+    const run_kat_tests = b.addRunArtifact(kat_tests);
+    test_step.dependOn(&run_kat_tests.step);
+
     // ---------------------------------------------------------------------
     // Benchmarks — pinned to ReleaseFast unless overridden.
     // ---------------------------------------------------------------------
