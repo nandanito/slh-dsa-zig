@@ -42,8 +42,8 @@ post-quantum cryptography effort in Zig, and the direct successor to
 | Hash adapters (SHA-2) | FIPS 205 §11.2 | ✅ Implemented |
 | Hash adapters (SHAKE) | FIPS 205 §11.1 | ✅ Implemented |
 | ADRS structure | FIPS 205 §4.3, §11.2 (ADRSc) | ✅ Implemented |
-| WOTS+ | FIPS 205 §5 | 🚧 `chain` + `pkGen` ✅ · sign path pending |
-| XMSS | FIPS 205 §6 | 🚧 `node` ✅ · sign path pending |
+| WOTS+ | FIPS 205 §5 | ✅ `chain`, `pkGen`, `sign`, `pkFromSig` (property-tested) |
+| XMSS | FIPS 205 §6 | ✅ `node`, `sign`, `pkFromSig` (property-tested) |
 | Hypertree | FIPS 205 §7 | 🚧 Skeleton |
 | FORS | FIPS 205 §8 | 🚧 Skeleton |
 | SLH-DSA key generation | FIPS 205 §9.1, §10.1 | ✅ ACVP keyGen KATs pass (120/120, all 12 sets) |
@@ -205,8 +205,8 @@ arrives as early as possible (see issue #7):
 
 **Milestone 2 — signing path:**
 
-- [ ] WOTS+ `sign` + `pkFromSig` (FIPS 205 §5.2–5.3)
-- [ ] XMSS `sign` + `pkFromSig` (FIPS 205 §6.2–6.3)
+- [x] WOTS+ `sign` + `pkFromSig` (FIPS 205 §5.2–5.3)
+- [x] XMSS `sign` + `pkFromSig` (FIPS 205 §6.2–6.3)
 - [ ] Hypertree signing and verification (FIPS 205 §7)
 - [ ] FORS signing and verification (FIPS 205 §8)
 - [ ] Context-string API decision (issue #8) + top-level `slh_sign`, `slh_verify`

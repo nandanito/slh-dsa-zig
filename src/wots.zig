@@ -20,8 +20,7 @@
 //!     for any message whose digits are pointwise >= those of the
 //!     original message. The checksum makes that impossible.
 //!
-//! Status: chain + pkGen implemented (keygen path); sign + pkFromSig are
-//! stubs that @panic with FIPS 205 algorithm references.
+//! Status: full WOTS+ layer implemented — chain, pkGen, sign, pkFromSig.
 
 const std = @import("std");
 const params_mod = @import("params.zig");
@@ -113,10 +112,45 @@ pub fn Wots(comptime p: params_mod.Params) type {
         }
 
         // -----------------------------------------------------------------
+        // Message-to-digits: convert the n-byte message to `len` base-w
+        // digits — `len_1` message digits followed by `len_2` checksum
+        // digits. Shared by wots_sign and wots_pkFromSig (FIPS 205 §5.2
+        // Algorithm 7 lines 1–7; §5.3 Algorithm 8 lines 1–7 are identical).
+        //
+        // The digits are the per-chain step counts. They are *public after
+        // signing* — recoverable from the signature — and M is itself a
+        // public tree/FORS value at every WOTS+ call site in SLH-DSA, so
+        // gating `chain` on them (as it does on its step count) is
+        // constant-time-safe.
+        // -----------------------------------------------------------------
+        fn baseWDigits(msg: *const [n]u8, out: *[len]u32) void {
+            // Message digits (Algorithm 7 line 2).
+            util.base_2b(msg, lg_w, out[0..len_1]);
+
+            // Checksum over the message digits (lines 1, 3–5).
+            const wm1: u32 = @intCast(w - 1);
+            var csum: u32 = 0;
+            for (out[0..len_1]) |d| csum += wm1 - d;
+
+            // Left-align the checksum in its byte field, then split into
+            // base-w digits (lines 6–7). For lg_w = 4 the shift moves the
+            // 12-bit checksum to the top of a 2-byte field.
+            const csum_shift: u6 = @intCast((8 - ((len_2 * lg_w) % 8)) % 8);
+            var csum_bytes: [(len_2 * lg_w + 7) / 8]u8 = undefined;
+            util.toByte(@as(u64, csum) << csum_shift, &csum_bytes);
+            util.base_2b(&csum_bytes, lg_w, out[len_1..len]);
+        }
+
+        // -----------------------------------------------------------------
         // FIPS 205 §5.2 Algorithm 7 — wots_sign(M, SK.seed, PK.seed, ADRS).
         //
         // Signs a length-n message digest with WOTS+. Output is `len`
-        // n-byte chain values.
+        // n-byte chain values: chain i is advanced msg_digits[i] steps from
+        // its secret origin.
+        //
+        // SK.seed is secret. The PRF chain-origin values are scrubbed before
+        // return; the msg-derived step counts are public after signing (see
+        // baseWDigits), so gating `chain` on them is constant-time-safe.
         // -----------------------------------------------------------------
         pub fn sign(
             msg: *const [n]u8,
@@ -125,12 +159,23 @@ pub fn Wots(comptime p: params_mod.Params) type {
             adrs: *address.Adrs,
             out_sig: *[signature_bytes]u8,
         ) void {
-            _ = msg;
-            _ = sk_seed;
-            _ = pk_seed;
-            _ = adrs;
-            _ = out_sig;
-            @panic("TODO: WOTS+ sign not implemented yet (FIPS 205 §5.2 Algorithm 7)");
+            var msg_digits: [len]u32 = undefined;
+            baseWDigits(msg, &msg_digits);
+
+            // skADRS: same layer/tree/keypair as ADRS, type WOTS_PRF.
+            var sk_adrs = adrs.*;
+            sk_adrs.setType(.wots_prf);
+            sk_adrs.setKeyPairAddress(adrs.getKeyPairAddress());
+
+            var sk: [n]u8 = undefined;
+            defer std.crypto.secureZero(u8, &sk);
+
+            for (0..len) |i| {
+                sk_adrs.setChainAddress(@intCast(i));
+                Hash.prf(sk_seed, pk_seed, &sk_adrs, &sk);
+                adrs.setChainAddress(@intCast(i));
+                chain(&sk, 0, msg_digits[i], pk_seed, adrs, out_sig[i * n ..][0..n]);
+            }
         }
 
         // -----------------------------------------------------------------
@@ -139,6 +184,11 @@ pub fn Wots(comptime p: params_mod.Params) type {
         // Reconstructs the WOTS+ public key from a candidate signature
         // and a message. The verifier uses this and compares against the
         // expected public key (stored in the parent XMSS leaf).
+        //
+        // Chain i resumes from its signed position msg_digits[i] and walks
+        // the remaining (w - 1 - msg_digits[i]) steps to the endpoint, so for
+        // a genuine signature the endpoints — and hence the compressed public
+        // key — match wots_PKgen exactly. All inputs are public here.
         // -----------------------------------------------------------------
         pub fn pkFromSig(
             sig: *const [signature_bytes]u8,
@@ -147,12 +197,24 @@ pub fn Wots(comptime p: params_mod.Params) type {
             adrs: *address.Adrs,
             out_pk: *[n]u8,
         ) void {
-            _ = sig;
-            _ = msg;
-            _ = pk_seed;
-            _ = adrs;
-            _ = out_pk;
-            @panic("TODO: WOTS+ pkFromSig not implemented yet (FIPS 205 §5.3 Algorithm 8)");
+            var msg_digits: [len]u32 = undefined;
+            baseWDigits(msg, &msg_digits);
+
+            const wm1: u32 = @intCast(w - 1);
+            // tmp holds the reconstructed chain endpoints — public key
+            // material, no scrub.
+            var tmp: [len * n]u8 = undefined;
+            for (0..len) |i| {
+                adrs.setChainAddress(@intCast(i));
+                const start = msg_digits[i];
+                chain(sig[i * n ..][0..n], start, wm1 - start, pk_seed, adrs, tmp[i * n ..][0..n]);
+            }
+
+            // wotspkADRS: same layer/tree/keypair as ADRS, type WOTS_PK.
+            var pk_adrs = adrs.*;
+            pk_adrs.setType(.wots_pk);
+            pk_adrs.setKeyPairAddress(adrs.getKeyPairAddress());
+            Hash.t_l(pk_seed, &pk_adrs, &tmp, out_pk);
         }
     };
 }
@@ -244,5 +306,63 @@ test "WOTS+ instantiates for all parameter sets" {
     inline for (std.enums.values(params_mod.ParamSet)) |ps| {
         const W = Wots(ps.params());
         _ = W.signature_bytes; // exercise type construction
+    }
+}
+
+test "pkFromSig(sign(M), M) reproduces pkGen at the same ADRS" {
+    // FIPS 205 §5.2/§5.3: a genuine WOTS+ signature reconstructs to exactly
+    // the public key wots_PKgen would produce — the sign/verify contract the
+    // XMSS layer relies on. Property-tested (no ACVP vectors at this layer)
+    // across both hash families and all f-variant security levels.
+    inline for (.{
+        params_mod.ParamSet.slh_dsa_shake_128f,
+        params_mod.ParamSet.slh_dsa_sha2_128f,
+        params_mod.ParamSet.slh_dsa_shake_192f,
+        params_mod.ParamSet.slh_dsa_sha2_192f,
+        params_mod.ParamSet.slh_dsa_shake_256f,
+        params_mod.ParamSet.slh_dsa_sha2_256f,
+    }) |ps| {
+        const p = comptime ps.params();
+        const W = Wots(p);
+        var sk_seed: [W.n]u8 = undefined;
+        var pk_seed: [W.n]u8 = undefined;
+        var msg: [W.n]u8 = undefined;
+        for (&sk_seed, 0..) |*b, i| b.* = @intCast(0x10 + i);
+        for (&pk_seed, 0..) |*b, i| b.* = @intCast(0x90 + i);
+        for (&msg, 0..) |*b, i| b.* = @intCast(0xC3 ^ i);
+        const kp: u32 = 5;
+
+        // Expected public key via wots_PKgen.
+        var adrs_pk = address.Adrs.init();
+        adrs_pk.setType(.wots_hash);
+        adrs_pk.setKeyPairAddress(kp);
+        var pk_expected: [W.n]u8 = undefined;
+        W.pkGen(&sk_seed, &pk_seed, &adrs_pk, &pk_expected);
+
+        // Sign M, then reconstruct the public key from the signature.
+        var adrs_sign = address.Adrs.init();
+        adrs_sign.setType(.wots_hash);
+        adrs_sign.setKeyPairAddress(kp);
+        var sig: [W.signature_bytes]u8 = undefined;
+        W.sign(&msg, &sk_seed, &pk_seed, &adrs_sign, &sig);
+
+        var adrs_ver = address.Adrs.init();
+        adrs_ver.setType(.wots_hash);
+        adrs_ver.setKeyPairAddress(kp);
+        var pk_from_sig: [W.n]u8 = undefined;
+        W.pkFromSig(&sig, &msg, &pk_seed, &adrs_ver, &pk_from_sig);
+        try std.testing.expectEqualSlices(u8, &pk_expected, &pk_from_sig);
+
+        // Negative control: verifying the same signature against a different
+        // message reconstructs a different public key (the checksum forbids a
+        // second message reaching every endpoint), so it no longer matches.
+        var msg2 = msg;
+        msg2[0] ^= 0xFF;
+        var adrs_ver2 = address.Adrs.init();
+        adrs_ver2.setType(.wots_hash);
+        adrs_ver2.setKeyPairAddress(kp);
+        var pk_from_sig2: [W.n]u8 = undefined;
+        W.pkFromSig(&sig, &msg2, &pk_seed, &adrs_ver2, &pk_from_sig2);
+        try std.testing.expect(!std.mem.eql(u8, &pk_expected, &pk_from_sig2));
     }
 }
