@@ -54,6 +54,21 @@ pub fn toByte(x: u64, out: []u8) void {
     std.debug.assert(value == 0); // overflow — bumped past buffer
 }
 
+/// FIPS 205 Algorithm 2 — toInt.
+///
+/// Interprets a big-endian byte string as a non-negative integer. Used by
+/// the top-level scheme to derive the hypertree tree/leaf indices from the
+/// message digest; those fields are at most 8 bytes across all parameter
+/// sets, so a u64 accumulator is exact.
+///
+/// Constant-time: yes — the loop bound is public.
+pub fn toInt(x: []const u8) u64 {
+    std.debug.assert(x.len <= 8); // widest digest index field is 8 bytes
+    var acc: u64 = 0;
+    for (x) |b| acc = (acc << 8) | b;
+    return acc;
+}
+
 // -----------------------------------------------------------------------------
 // Tests — values cross-checked against FIPS 205 §3 worked examples and against
 // PQClean's `base_w` reference output.
@@ -87,4 +102,19 @@ test "toByte: pads to length" {
 
     toByte(1, out[0..1]);
     try std.testing.expectEqual(@as(u8, 1), out[0]);
+}
+
+test "toInt: big-endian round-trip and toByte inverse" {
+    try std.testing.expectEqual(@as(u64, 0x12345678), toInt(&[_]u8{ 0x12, 0x34, 0x56, 0x78 }));
+    try std.testing.expectEqual(@as(u64, 0), toInt(&[_]u8{0}));
+    try std.testing.expectEqual(@as(u64, 0xFF), toInt(&[_]u8{0xFF}));
+    // Full 8-byte width must not overflow the u64 accumulator.
+    try std.testing.expectEqual(
+        @as(u64, 0x0102030405060708),
+        toInt(&[_]u8{ 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08 }),
+    );
+    // toInt(toByte(x)) == x for a value spanning several bytes.
+    var buf: [5]u8 = undefined;
+    toByte(0x9ABCDEF012, &buf);
+    try std.testing.expectEqual(@as(u64, 0x9ABCDEF012), toInt(&buf));
 }

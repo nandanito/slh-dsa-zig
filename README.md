@@ -47,7 +47,7 @@ post-quantum cryptography effort in Zig, and the direct successor to
 | Hypertree | FIPS 205 §7 | ✅ `ht_sign`, `ht_verify` (property-tested) |
 | FORS | FIPS 205 §8 | ✅ `skGen`, `node`, `sign`, `pkFromSig` (property-tested) |
 | SLH-DSA key generation | FIPS 205 §9.1, §10.1 | ✅ ACVP keyGen KATs pass (120/120, all 12 sets) |
-| SLH-DSA sign / verify | FIPS 205 §9.2–9.3, §10 | 🚧 Skeleton |
+| SLH-DSA sign / verify | FIPS 205 §9.2–9.3, §10 | ✅ pure + context (property-tested) · pre-hash deferred |
 | NIST ACVP KAT runner | — | 🚧 keyGen mode ✅ · sigGen/sigVer pending |
 | Benchmarks vs PQClean | — | 🚧 Skeleton |
 | Constant-time verification | ctgrind / valgrind | ⏳ Planned |
@@ -57,11 +57,12 @@ Legend: ✅ implemented and tested · 🚧 skeleton / in progress · ⏳ planned
 
 Key generation is implemented end-to-end and passes the NIST ACVP keyGen vectors for all 12
 parameter sets — which also exercises both hash-adapter families, the ADRS encodings, WOTS+
-public-key generation, and XMSS tree hashing against external ground truth. The signing
-primitives — WOTS+/XMSS sign, the hypertree, and FORS — are now implemented and validated by
-spec-derived property tests against that KAT-validated key generation. Only the top-level
-`slh_sign` / `slh_verify` (§9.2–9.3, §10) remain stubbed, pending the context-string API
-decision (issue #8); once they land, the ACVP sigGen/sigVer vectors become wireable.
+public-key generation, and XMSS tree hashing against external ground truth. The full signing
+chain — WOTS+/XMSS sign, the hypertree, FORS, and the top-level `slh_sign` / `slh_verify`
+(pure SLH-DSA with context strings, §9.2–9.3/§10.2–10.3) — is now implemented and validated
+by spec-derived property tests against that KAT-validated key generation. The remaining
+Milestone 2 work is wiring the ACVP sigGen/sigVer vectors — the formal exit gate (issue #25).
+The HashSLH-DSA pre-hash variants are deferred by decision (issue #8).
 
 ## Parameter sets
 
@@ -103,11 +104,12 @@ const slh_dsa_dep = b.dependency("slh_dsa", .{
 exe.root_module.addImport("slh_dsa", slh_dsa_dep.module("slh_dsa"));
 ```
 
-## Usage (planned API)
+## Usage
 
 The public API is comptime-parameterised; you pick a parameter set and get back a namespace
-with key/signature byte sizes and the three operations. This shape is locked, but the bodies
-are not yet implemented.
+with key/signature byte sizes and the operations. Key generation, signing, and verification
+are implemented (pure SLH-DSA with context strings); the HashSLH-DSA pre-hash variants are
+deferred (issue #8).
 
 ```zig
 const std = @import("std");
@@ -123,13 +125,18 @@ pub fn main() !void {
     // Key generation.
     const kp = try Scheme.KeyPair.generate(io);
 
-    // Signing (deterministic; pass `null` for opt_rand to disable randomisation).
+    // Signing. Pass a params.n-byte buffer as opt_rand for randomised (hedged)
+    // signing, or `null` for deterministic signing.
     const message = "attack at dawn";
     var sig: [Scheme.signature_length]u8 = undefined;
     try Scheme.sign(&sig, message, &kp.secret_key, null);
 
     // Verification.
     try Scheme.verify(&sig, message, &kp.public_key);
+
+    // With a context string (max 255 bytes; > 255 → error.ContextTooLong):
+    try Scheme.signWithContext(&sig, message, "my-app-v1", &kp.secret_key, null);
+    try Scheme.verifyWithContext(&sig, message, "my-app-v1", &kp.public_key);
 }
 ```
 
@@ -210,8 +217,8 @@ arrives as early as possible (see issue #7):
 - [x] XMSS `sign` + `pkFromSig` (FIPS 205 §6.2–6.3)
 - [x] Hypertree signing and verification (FIPS 205 §7)
 - [x] FORS signing and verification (FIPS 205 §8)
-- [ ] Context-string API decision (issue #8) + top-level `slh_sign`, `slh_verify`
-- [ ] **NIST ACVP sigGen + sigVer KAT pass, all 12 parameter sets**
+- [x] Context-string API decision (issue #8) + top-level `slh_sign`, `slh_verify`
+- [ ] **NIST ACVP sigGen + sigVer KAT pass, all 12 parameter sets** (issue #25)
 
 **Milestone 3 — hardening and release:**
 

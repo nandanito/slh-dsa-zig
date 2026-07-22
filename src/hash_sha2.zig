@@ -123,12 +123,12 @@ pub fn Sha2Adapter(comptime p: params_mod.Params) type {
         pub fn prf_msg(
             sk_prf: *const [n]u8,
             opt_rand: *const [n]u8,
-            msg: []const u8,
+            msg_parts: []const []const u8,
             out: *[n]u8,
         ) void {
             var mac = MsgHmac.init(sk_prf);
             mac.update(opt_rand);
-            mac.update(msg);
+            for (msg_parts) |part| mac.update(part);
             var tag: [MsgHmac.mac_length]u8 = undefined;
             mac.final(&tag);
             @memcpy(out, tag[0..n]);
@@ -146,14 +146,14 @@ pub fn Sha2Adapter(comptime p: params_mod.Params) type {
             rand: *const [n]u8,
             pk_seed: *const [n]u8,
             pk_root: *const [n]u8,
-            msg: []const u8,
+            msg_parts: []const []const u8,
             out: *[m]u8,
         ) void {
             var inner = MsgHash.init(.{});
             inner.update(rand);
             inner.update(pk_seed);
             inner.update(pk_root);
-            inner.update(msg);
+            for (msg_parts) |part| inner.update(part);
             var digest: [MsgHash.digest_length]u8 = undefined;
             inner.final(&digest);
 
@@ -373,7 +373,7 @@ test "sha2 PRF_msg (n=24): matches Trunc_n(HMAC-SHA-512(SK.prf, opt_rand || M))"
     const msg = "the quick brown fox jumps";
 
     var got: [n]u8 = undefined;
-    A.prf_msg(&sk_prf, &opt_rand, msg, &got);
+    A.prf_msg(&sk_prf, &opt_rand, &.{msg}, &got);
 
     var hmac_msg: [n + msg.len]u8 = undefined;
     @memcpy(hmac_msg[0..n], &opt_rand);
@@ -397,7 +397,7 @@ test "sha2 H_msg (n=16, m=34): matches MGF1-SHA-256 over inner digest, two block
     const msg = "FIPS 205 H_msg over SHA-256";
 
     var got: [m]u8 = undefined;
-    A.h_msg(&rand, &pk_seed, &pk_root, msg, &got);
+    A.h_msg(&rand, &pk_seed, &pk_root, &.{msg}, &got);
 
     // inner = SHA-256(R || PK.seed || PK.root || M)
     var inner_buf: [3 * n + msg.len]u8 = undefined;

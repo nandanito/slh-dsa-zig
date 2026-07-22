@@ -81,6 +81,34 @@ Crypto layering rule: nothing in `wots.zig` may know about XMSS; nothing in `xms
 know about the hypertree; nothing in `fors.zig` may know about the top-level scheme.
 ADRS and the hash adapter are the only cross-cutting modules.
 
+### Public API: internal vs external interface, and context strings
+
+`Slh_Dsa(param_set)` exposes two tiers, following `std.crypto.ml_dsa` (the FIPS-204 sibling
+with the same §10.2 context design — issue #8):
+
+- **External interface** (FIPS 205 §10.2/§10.3) — what real callers use.
+  - `sign(out, msg, sk, opt_rand)` / `verify(sig, msg, pk)` — pure SLH-DSA, empty context.
+  - `signWithContext(out, msg, ctx, sk, opt_rand)` / `verifyWithContext(sig, msg, ctx, pk)` —
+    with a context string. `ctx.len > 255` returns `error.ContextTooLong` (the canonical
+    `std.crypto.errors` name). The message is domain-separated as
+    `M' = toByte(0,1) ‖ toByte(|ctx|,1) ‖ ctx ‖ M` before internal signing.
+- **Internal interface** (FIPS 205 §9.2/§9.3) — `signInternal` / `verifyInternal` sign `M`
+  directly with no context prefix, symmetric with `KeyPair.fromSeeds`. Exposed for the ACVP
+  internal-interface test mode.
+
+`opt_rand` is the per-signature randomiser: a `params.n`-byte buffer for randomised (hedged)
+signing, or `null` to fall back to `PK.seed` for deterministic signing (FIPS 205 §9.2).
+
+To keep signing allocation-free for arbitrary-length messages, the `PRF_msg` / `H_msg`
+adapters absorb the message as an ordered sequence of parts, so the context prefix is
+prepended without copying `M`.
+
+**HashSLH-DSA is deferred.** The pre-hash variants `hash_slh_sign` / `hash_slh_verify`
+(FIPS 205 §10.2/§10.3 — domain separator `0x01` plus a per-hash OID over `PH(M)`) are a
+deliberate future addition, not an omission (issue #8): `std.crypto` ships ML-DSA without
+HashML-DSA, ACVP certifies pre-hash as a separate group, and adding it later is additive and
+non-breaking. Until then this library implements only the pure variant.
+
 ## The comptime parameterisation pattern
 
 SLH-DSA has 12 parameter sets. Rather than dispatching at runtime, the library uses
