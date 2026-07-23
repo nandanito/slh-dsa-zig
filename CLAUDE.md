@@ -93,7 +93,7 @@ These are non-negotiable for code in `src/`:
 | **Zeroize secrets** | Every secret cleared before scope exit. Use volatile semantics where the compiler may DCE the zeroing. |
 | **KAT-validated** | Scheme-level operations (keyGen/sigGen/sigVer) must pass NIST ACVP vectors before being declared functional. Components without NIST vectors (WOTS+, XMSS, FORS internals) are validated via the scheme-level KATs that exercise them, spec-derived property tests, and reference-derived intermediate fixtures where needed (issue #7). |
 | **Fuzzed** | Every parser, deserializer, and public API gets a fuzz harness running ≥24h in CI. |
-| **Benchmarked** | Performance must be within 2× of PQClean C reference on equivalent hardware. |
+| **Benchmarked** | Performance must be within 2× of PQClean's portable `clean` C reference on equivalent hardware (AVX2 reported, not gated). See `bench/README.md`. |
 | **ctgrind/valgrind-verified** | Constant-time properties empirically verified, not just claimed. |
 
 When you produce code that *might* violate any of these, **flag it
