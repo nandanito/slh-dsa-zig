@@ -267,7 +267,8 @@ When adding a new source file:
 - One concern per PR. Don't bundle "WOTS+ implementation" with "CI tweaks".
 - PR description references the FIPS 205 sections implemented.
 - Status checks must be green: `fmt`, `build-test` (x86_64 + ARM64, Debug
-  + ReleaseSafe), and `lane-b-trailer` (if any commit touched `upstream-candidate/`).
+  + ReleaseSafe), `kat` (ACVP keyGen/sigGen/sigVer against the pinned NIST
+  vectors), and `lane-b-trailer` (if any commit touched `upstream-candidate/`).
 
 ---
 
