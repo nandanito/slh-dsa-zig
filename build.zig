@@ -90,12 +90,25 @@ pub fn build(b: *std.Build) void {
         "Optimisation mode for the benchmark binary (default ReleaseFast)",
     ) orelse .ReleaseFast;
 
+    // The benchmark links its own copy of the library compiled at
+    // `bench_optimize`, so the timed scheme code is optimised identically to
+    // the harness and independently of the top-level `-Doptimize`. (Zig 0.16
+    // already compiles imported modules at the root artifact's optimize mode,
+    // so importing the default `slh_dsa_mod` measures the same thing today;
+    // pinning a dedicated module makes the bench's optimize contract explicit
+    // and robust to that behaviour changing.)
+    const slh_dsa_bench_mod = b.createModule(.{
+        .root_source_file = b.path("src/root.zig"),
+        .target = target,
+        .optimize = bench_optimize,
+    });
+
     const bench_mod = b.createModule(.{
         .root_source_file = b.path("bench/bench.zig"),
         .target = target,
         .optimize = bench_optimize,
     });
-    bench_mod.addImport("slh_dsa", slh_dsa_mod);
+    bench_mod.addImport("slh_dsa", slh_dsa_bench_mod);
 
     const bench_exe = b.addExecutable(.{
         .name = "slh-dsa-bench",

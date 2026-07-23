@@ -18,26 +18,42 @@
 //!   - We report the median of N runs after dropping the slowest 10% as
 //!     warmup. The mean is also printed but the median is the headline.
 //!
-//! Status: SKELETON. The inner loops drive `KeyPair.generate`, `sign`,
-//! and `verify`, all of which currently `@panic`. The harness compiles
-//! and runs (it prints the table header and parameter-set list), but
-//! the body of each measurement will trap until the scheme is
-//! implemented.
+//! Comparison baseline: the 2× performance gate (CLAUDE.md discipline
+//! table, README "Cryptographic discipline" item 6) is pinned to
+//! PQClean's portable `clean` variant, *not* its AVX2 path. See
+//! bench/README.md for the methodology and the recorded reference
+//! commit; AVX2 numbers are reported for honesty but never gated on.
 //!
 //! Lane: Lane A (test/perf infrastructure).
 
 const std = @import("std");
+const builtin = @import("builtin");
 const slh_dsa = @import("slh_dsa");
 
 // -----------------------------------------------------------------------------
-// Iteration budgets. Tuned so even the slowest parameter set (sha2_256s
-// signing) finishes in seconds, not minutes. Override at the CLI with
-// --iters.
+// Iteration budgets. Chosen from measured timings so that a no-arg
+// `zig build bench` (all ops, all 12 sets) finishes in tens of seconds, not
+// minutes. Override at the CLI with --iters.
+//
+// The "small-signature" (`s`) parameter sets sign ~20–100× slower than their
+// "fast" (`f`) siblings — fewer hypertree layers means taller subtrees and
+// far more WOTS+ work per signature — so they get smaller budgets. Verify is
+// cheap for every set, so its budget is uniform. For tighter medians on a
+// single set, pass a larger --iters.
 // -----------------------------------------------------------------------------
 
-const default_iters_keygen: u32 = 50;
-const default_iters_sign: u32 = 50;
-const default_iters_verify: u32 = 500;
+const IterBudget = struct { keygen: u32, sign: u32, verify: u32 };
+
+const fast_budget: IterBudget = .{ .keygen = 50, .sign = 50, .verify = 500 };
+const small_budget: IterBudget = .{ .keygen = 20, .sign = 5, .verify = 500 };
+
+/// The `s` variants are the "small-signature / slow-signing" sets; the tag
+/// suffix (`...128s` vs `...128f`) is the canonical discriminator (FIPS 205
+/// §11 naming; see src/params.zig ParamSet doc comment).
+fn defaultBudget(comptime param_set: slh_dsa.ParamSet) IterBudget {
+    const name = @tagName(param_set);
+    return if (name[name.len - 1] == 's') small_budget else fast_budget;
+}
 
 // -----------------------------------------------------------------------------
 // CLI.
@@ -177,10 +193,11 @@ fn printSample(s: Sample) void {
 // -----------------------------------------------------------------------------
 // Per-op benchmark drivers.
 //
-// SKELETON: each driver allocates fixed-size scratch buffers sized to the
-// parameter set and runs `iters` invocations of the operation. Once the
-// underlying scheme lands these become real measurements; today they
-// will @panic on the first iteration.
+// Each driver allocates a fixed-size sample buffer sized to the iteration
+// count and runs `iters` invocations of the operation, timing each with
+// `std.Io.Clock.awake`. Inputs are set up once and reused across the loop so
+// the numbers reflect steady-state cost, and every result is kept live with
+// `std.mem.doNotOptimizeAway` so the optimiser cannot DCE the operation.
 // -----------------------------------------------------------------------------
 
 fn benchOne(
@@ -191,72 +208,96 @@ fn benchOne(
     iters_override: ?u32,
 ) !void {
     const Scheme = slh_dsa.Slh_Dsa(param_set);
+    const n = Scheme.params.n;
+    const budget = comptime defaultBudget(param_set);
 
-    // Fixed inputs reused inside the loop so we measure steady-state cost.
-    var msg = [_]u8{0x42} ** 64;
-    _ = &msg;
+    // Fixed message reused across every measurement loop for this parameter
+    // set, so we capture steady-state cost, not first-touch effects.
+    const msg = [_]u8{0x42} ** 64;
 
     if (op == .all or op == .keygen) {
-        const iters = iters_override orelse default_iters_keygen;
+        const iters = iters_override orelse budget.keygen;
         const ns = try allocator.alloc(u64, iters);
         defer allocator.free(ns);
 
-        // TODO: drive Scheme.KeyPair.generate(io) in a loop once the
-        // implementation lands. The skeleton call below will @panic,
-        // which is the intended behaviour pre-implementation.
+        // Draw fresh key material each iteration from the real CSPRNG — this
+        // is the cost callers actually pay. An entropy failure aborts the
+        // bench (surfaced as error.IoError) rather than reporting a bogus number.
         var i: u32 = 0;
         while (i < iters) : (i += 1) {
             const start = std.Io.Clock.awake.now(io).nanoseconds;
-            // _ = try Scheme.KeyPair.generate(io);
-            std.mem.doNotOptimizeAway(Scheme.public_key_length);
+            const kp = try Scheme.KeyPair.generate(io);
             const end = std.Io.Clock.awake.now(io).nanoseconds;
+            std.mem.doNotOptimizeAway(&kp);
             ns[i] = @intCast(end - start);
         }
         printSample(computeStats(ns, "keygen", param_set, iters));
     }
 
-    if (op == .all or op == .sign) {
-        const iters = iters_override orelse default_iters_sign;
-        const ns = try allocator.alloc(u64, iters);
-        defer allocator.free(ns);
+    // Sign and verify share a deterministic keypair. `fromSeeds` needs no
+    // entropy, so the setup is reproducible run to run and independent of the
+    // keygen loop above.
+    if (op == .all or op == .sign or op == .verify) {
+        var sk_seed: [n]u8 = undefined;
+        var sk_prf: [n]u8 = undefined;
+        var pk_seed: [n]u8 = undefined;
+        for (&sk_seed, 0..) |*b, i| b.* = @intCast(0x11 + i);
+        for (&sk_prf, 0..) |*b, i| b.* = @intCast(0x55 + i);
+        for (&pk_seed, 0..) |*b, i| b.* = @intCast(0x99 + i);
+        // Local seed copies are secret; fromSeeds retains them in the SK by
+        // design, but scrub these stack buffers once we're done with them.
+        defer std.crypto.secureZero(u8, &sk_seed);
+        defer std.crypto.secureZero(u8, &sk_prf);
+        const kp = try Scheme.KeyPair.fromSeeds(&sk_seed, &sk_prf, &pk_seed);
 
-        var sk: Scheme.SecretKey = undefined;
-        @memset(&sk, 0);
-        var sig: Scheme.Signature = undefined;
-        _ = &sig;
+        // Fixed per-signature randomiser: measures the randomised (default)
+        // signing path without paying the RNG cost inside the timed loop.
+        var opt_rand: [n]u8 = undefined;
+        for (&opt_rand, 0..) |*b, i| b.* = @intCast(0xE1 ^ i);
 
-        // TODO: real sign loop.
-        //   try Scheme.sign(&sig, &msg, &sk, null);
-        var i: u32 = 0;
-        while (i < iters) : (i += 1) {
-            const start = std.Io.Clock.awake.now(io).nanoseconds;
-            std.mem.doNotOptimizeAway(&sk);
-            const end = std.Io.Clock.awake.now(io).nanoseconds;
-            ns[i] = @intCast(end - start);
+        if (op == .all or op == .sign) {
+            const iters = iters_override orelse budget.sign;
+            const ns = try allocator.alloc(u64, iters);
+            defer allocator.free(ns);
+
+            var sig: Scheme.Signature = undefined;
+            var i: u32 = 0;
+            while (i < iters) : (i += 1) {
+                const start = std.Io.Clock.awake.now(io).nanoseconds;
+                try Scheme.sign(&sig, &msg, &kp.secret_key, &opt_rand);
+                const end = std.Io.Clock.awake.now(io).nanoseconds;
+                std.mem.doNotOptimizeAway(&sig);
+                ns[i] = @intCast(end - start);
+            }
+            printSample(computeStats(ns, "sign", param_set, iters));
         }
-        printSample(computeStats(ns, "sign", param_set, iters));
-    }
 
-    if (op == .all or op == .verify) {
-        const iters = iters_override orelse default_iters_verify;
-        const ns = try allocator.alloc(u64, iters);
-        defer allocator.free(ns);
+        if (op == .all or op == .verify) {
+            const iters = iters_override orelse budget.verify;
+            const ns = try allocator.alloc(u64, iters);
+            defer allocator.free(ns);
 
-        var pk: Scheme.PublicKey = undefined;
-        @memset(&pk, 0);
-        var sig: Scheme.Signature = undefined;
-        @memset(&sig, 0);
+            // A valid signature to verify, produced once outside the loop.
+            var sig: Scheme.Signature = undefined;
+            try Scheme.sign(&sig, &msg, &kp.secret_key, &opt_rand);
 
-        // TODO: real verify loop.
-        //   _ = Scheme.verify(&sig, &msg, &pk) catch {};
-        var i: u32 = 0;
-        while (i < iters) : (i += 1) {
-            const start = std.Io.Clock.awake.now(io).nanoseconds;
-            std.mem.doNotOptimizeAway(&pk);
-            const end = std.Io.Clock.awake.now(io).nanoseconds;
-            ns[i] = @intCast(end - start);
+            var i: u32 = 0;
+            while (i < iters) : (i += 1) {
+                const start = std.Io.Clock.awake.now(io).nanoseconds;
+                // Fold verify's result into a live value *before* stopping the
+                // clock. verify has no output but its return, so
+                // `... catch unreachable` (discarding it) would let ReleaseFast
+                // elide the whole call and leave us timing clock overhead —
+                // pinning only `&sig` keeps the input live, not the work
+                // (Codex review, PR #31). Observing `ok` keeps the verifier
+                // inside the timed region.
+                const ok = if (Scheme.verify(&sig, &msg, &kp.public_key)) |_| true else |_| false;
+                std.mem.doNotOptimizeAway(ok);
+                const end = std.Io.Clock.awake.now(io).nanoseconds;
+                ns[i] = @intCast(end - start);
+            }
+            printSample(computeStats(ns, "verify", param_set, iters));
         }
-        printSample(computeStats(ns, "verify", param_set, iters));
     }
 }
 
@@ -270,9 +311,9 @@ pub fn main(init: std.process.Init) !u8 {
 
     const cli = parseCli(args) catch return 1;
 
-    std.debug.print("slh-dsa-bench (skeleton — bodies will panic until scheme lands)\n", .{});
-    std.debug.print("note: compare against PQClean reference at " ++
-        "https://github.com/PQClean/PQClean\n\n", .{});
+    std.debug.print("slh-dsa-bench (optimize={s})\n", .{@tagName(builtin.mode)});
+    std.debug.print("note: the 2x gate is measured against PQClean's `clean` " ++
+        "(portable) variant, not AVX2 — see bench/README.md\n\n", .{});
     std.debug.print("  {s:<19}  {s:<7}  {s:<11}  {s:>15}  {s:>17}  {s:>16}\n", .{
         "param-set",
         "op",

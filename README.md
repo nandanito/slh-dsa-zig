@@ -49,7 +49,7 @@ post-quantum cryptography effort in Zig, and the direct successor to
 | SLH-DSA key generation | FIPS 205 §9.1, §10.1 | ✅ ACVP keyGen KATs pass (120/120, all 12 sets) |
 | SLH-DSA sign / verify | FIPS 205 §9.2–9.3, §10 | ✅ ACVP sigGen/sigVer KATs pass (all 12 sets, internal + external) · pre-hash deferred |
 | NIST ACVP KAT runner | — | ✅ keyGen · sigGen · sigVer modes (pre-hash groups skipped) |
-| Benchmarks vs PQClean | — | 🚧 Skeleton |
+| Benchmarks vs PQClean | — | 🚧 Harness wired (real keygen/sign/verify); pinned `clean` gate + published numbers pending (#10) |
 | Constant-time verification | ctgrind / valgrind | ⏳ Planned |
 | Fuzz harnesses | std.testing.fuzz | ⏳ Planned |
 
@@ -192,8 +192,9 @@ aspirational; they are gates each component must pass before being declared func
 4. **KAT-validated** — passes NIST ACVP vectors for the relevant parameter set.
 5. **Fuzzed** — every public deserialiser carries a fuzz harness running ≥24h in CI before
    the component moves out of skeleton status.
-6. **Benchmarked** — performance compared against PQClean's C reference on the same hardware,
-   target within 2×.
+6. **Benchmarked** — performance within 2× of PQClean's portable `clean` C reference on
+   equivalent hardware. The AVX2 build is reported for honesty but not gated. See
+   [bench/README.md](bench/README.md).
 
 See [SECURITY.md](SECURITY.md) for the responsible-disclosure policy and current limitations.
 
