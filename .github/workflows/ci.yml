@@ -74,6 +74,86 @@ jobs:
         # compiles in ReleaseFast catches optimisation-mode-specific issues.
 
   # ---------------------------------------------------------------------------
+  # ACVP Known-Answer Tests — the external ground-truth gate. Fetches the
+  # pinned NIST sample vectors and runs all three modes (keyGen + sigGen +
+  # sigVer) across the 12 parameter sets. A green run means real coverage: the
+  # runner exits non-zero on any mismatch AND on "zero vectors executed", so
+  # this cannot pass by validating nothing.
+  #
+  # Single-arch (x86_64) by design: the KAT sweep is architecture-independent
+  # (the hash primitives are deterministic and endian-safe), and keyGen is
+  # already exercised on ARM64 through the unit-test matrix above. Promote this
+  # to a `{os}` matrix if a platform-specific regression is ever suspected.
+  # ---------------------------------------------------------------------------
+  kat:
+    name: ACVP KAT (keyGen/sigGen/sigVer)
+    needs: fmt
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # Pinned ACVP-Server commit — RELEASE/v1.1.0.40 (2025-06-12), the last
+      # release that changed the SLH-DSA vector folders. Content served at a
+      # commit SHA is immutable, so this pins exactly what CI validates. Bump
+      # deliberately: a NIST regen must not silently move the ground truth.
+      # Recorded here and in tests/vectors/README.md.
+      ACVP_COMMIT: 112690e8484dba7077709a05b1f3af58ddefdd5d
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@v2.2.1
+        with:
+          version: 0.16.0
+
+      # The three sample-vector files (~69 MB total) are keyed on the pinned
+      # commit, so bumping ACVP_COMMIT invalidates the cache and re-fetches.
+      - name: Cache pinned ACVP vectors
+        id: cache-vectors
+        uses: actions/cache@v4
+        with:
+          path: |
+            tests/vectors/keygen.json
+            tests/vectors/siggen.json
+            tests/vectors/sigver.json
+          key: acvp-vectors-${{ env.ACVP_COMMIT }}
+
+      # Raw fetch at the pinned SHA pulls exactly the three
+      # internalProjection.json files and no git metadata. The sparse-checkout
+      # alternative is documented in tests/vectors/README.md.
+      - name: Fetch pinned ACVP vectors
+        if: steps.cache-vectors.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="https://raw.githubusercontent.com/usnistgov/ACVP-Server/${ACVP_COMMIT}/gen-val/json-files"
+          curl -fsSL "$base/SLH-DSA-keyGen-FIPS205/internalProjection.json" -o tests/vectors/keygen.json
+          curl -fsSL "$base/SLH-DSA-sigGen-FIPS205/internalProjection.json" -o tests/vectors/siggen.json
+          curl -fsSL "$base/SLH-DSA-sigVer-FIPS205/internalProjection.json" -o tests/vectors/sigver.json
+
+      - name: Verify vectors present
+        shell: bash
+        run: |
+          set -euo pipefail
+          for f in keygen siggen sigver; do
+            test -s "tests/vectors/$f.json" \
+              || { echo "::error::missing or empty tests/vectors/$f.json"; exit 1; }
+          done
+          ls -l tests/vectors/*.json
+
+      # ReleaseFast: the `s` parameter sets sign slowly under Debug and sigGen
+      # is the long pole. The runner compiles once (first step) and the later
+      # steps reuse the cached binary. Each invocation exits non-zero on any
+      # mismatch or on zero executed vectors, failing the job.
+      - name: keyGen KAT
+        run: zig build kat -Doptimize=ReleaseFast -- --mode keygen --vectors tests/vectors/keygen.json
+
+      - name: sigGen KAT
+        run: zig build kat -Doptimize=ReleaseFast -- --mode siggen --vectors tests/vectors/siggen.json
+
+      - name: sigVer KAT
+        run: zig build kat -Doptimize=ReleaseFast -- --mode sigver --vectors tests/vectors/sigver.json
+
+  # ---------------------------------------------------------------------------
   # Lane B compliance — every commit that touches `upstream-candidate/`
   # must carry the `Lane B compliant:` trailer.
   # ---------------------------------------------------------------------------

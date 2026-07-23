@@ -61,6 +61,30 @@ cp "$J/SLH-DSA-sigGen-FIPS205/internalProjection.json" tests/vectors/siggen.json
 cp "$J/SLH-DSA-sigVer-FIPS205/internalProjection.json" tests/vectors/sigver.json
 ```
 
+## Pinned commit (CI)
+
+CI does not fetch from a moving branch. The `kat` job in
+`.github/workflows/ci.yml` pins a specific ACVP-Server commit so a NIST regen
+cannot silently change what the build validates:
+
+```
+ACVP_COMMIT = 112690e8484dba7077709a05b1f3af58ddefdd5d   # RELEASE/v1.1.0.40 (2025-06-12)
+```
+
+This is the last release that changed the SLH-DSA vector folders; content
+served at a commit SHA is immutable, so the pin fixes the exact corpus. CI
+fetches the three files by raw URL at that SHA — e.g.
+
+```
+https://raw.githubusercontent.com/usnistgov/ACVP-Server/112690e8484dba7077709a05b1f3af58ddefdd5d/gen-val/json-files/SLH-DSA-keyGen-FIPS205/internalProjection.json
+```
+
+**Bumping the pin** (deliberate, not automatic): pick the new commit, update
+`ACVP_COMMIT` in `ci.yml` and the value above, re-fetch locally, and re-run all
+three modes to confirm the implementation still matches before merging. The
+pinned corpus currently passes keyGen 120/120, sigGen 336/336, sigVer 336/336
+(pre-hash groups skipped — see below).
+
 ## Running the runner
 
 ```sh
