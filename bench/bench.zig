@@ -284,9 +284,16 @@ fn benchOne(
             var i: u32 = 0;
             while (i < iters) : (i += 1) {
                 const start = std.Io.Clock.awake.now(io).nanoseconds;
-                Scheme.verify(&sig, &msg, &kp.public_key) catch unreachable;
+                // Fold verify's result into a live value *before* stopping the
+                // clock. verify has no output but its return, so
+                // `... catch unreachable` (discarding it) would let ReleaseFast
+                // elide the whole call and leave us timing clock overhead —
+                // pinning only `&sig` keeps the input live, not the work
+                // (Codex review, PR #31). Observing `ok` keeps the verifier
+                // inside the timed region.
+                const ok = if (Scheme.verify(&sig, &msg, &kp.public_key)) |_| true else |_| false;
+                std.mem.doNotOptimizeAway(ok);
                 const end = std.Io.Clock.awake.now(io).nanoseconds;
-                std.mem.doNotOptimizeAway(&sig);
                 ns[i] = @intCast(end - start);
             }
             printSample(computeStats(ns, "verify", param_set, iters));
