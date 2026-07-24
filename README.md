@@ -51,7 +51,7 @@ post-quantum cryptography effort in Zig, and the direct successor to
 | NIST ACVP KAT runner | — | ✅ keyGen · sigGen · sigVer modes (pre-hash groups skipped) |
 | Benchmarks vs PQClean | — | 🚧 Harness wired (real keygen/sign/verify); pinned `clean` gate + published numbers pending (#10) |
 | Constant-time verification | ctgrind / valgrind | ⏳ Planned |
-| Fuzz harnesses | std.testing.fuzz | ⏳ Planned |
+| Fuzz harnesses | std.testing.fuzz | 🚧 Harnesses wired (verify, ACVP parser); cumulative nightly fuzzing accruing toward the 24h gate (#9) |
 
 Legend: ✅ implemented and tested · 🚧 skeleton / in progress · ⏳ planned · ❌ not started
 
@@ -190,8 +190,11 @@ aspirational; they are gates each component must pass before being declared func
 3. **Explicit secret zeroisation** — sensitive material zeroed before scope exit, with
    compiler barriers where the optimiser might otherwise drop the stores.
 4. **KAT-validated** — passes NIST ACVP vectors for the relevant parameter set.
-5. **Fuzzed** — every public deserialiser carries a fuzz harness running ≥24h in CI before
-   the component moves out of skeleton status.
+5. **Fuzzed** — every attacker-facing parser and the `verify` path carries a
+   `std.testing.fuzz` harness. GitHub Actions caps a job at 6h, so the gate is
+   *cumulative*: a nightly workflow fuzzes for a bounded window, persists the
+   corpus, and accrues ≥24h total before the component moves out of skeleton
+   status.
 6. **Benchmarked** — performance within 2× of PQClean's portable `clean` C reference on
    equivalent hardware. The AVX2 build is reported for honesty but not gated. See
    [bench/README.md](bench/README.md).
