@@ -134,6 +134,64 @@ pub fn build(b: *std.Build) void {
     fuzz_step.dependOn(&run_fuzz_tests.step);
 
     // ---------------------------------------------------------------------
+    // Constant-time (ctgrind) harness — taints SK.seed and signs so Valgrind's
+    // memcheck can flag any secret-dependent branch or memory access. Uses
+    // std.valgrind client requests (pure Zig, no C shim). See issue #34 and
+    // .github/workflows/ctgrind.yml, which runs the built binary under Valgrind.
+    //
+    //   zig build ctgrind            — build + run directly (no-op taint; sanity)
+    //   valgrind zig-out/bin/slh-dsa-ctgrind   — the real constant-time check
+    // ---------------------------------------------------------------------
+
+    // Force Zig to emit the std.valgrind client requests even in release
+    // builds — without this they compile to no-ops outside Debug (`-fvalgrind`
+    // default), so the taint markers would be inert and the check vacuous
+    // (the workflow builds ReleaseSafe). But `-fvalgrind` only compiles on
+    // targets Zig supports it for — not, e.g., the maintainer's aarch64 macOS
+    // box — so gate it on the arch. Off-target it degrades to no-ops, which is
+    // fine: Valgrind only runs in CI on x86_64, and the negative control proves
+    // the on-target build is non-vacuous.
+    const valgrind_ok = target.result.cpu.arch == .x86_64;
+
+    const ctgrind_mod = b.createModule(.{
+        .root_source_file = b.path("tests/ctgrind/taint_components.zig"),
+        .target = target,
+        .optimize = optimize,
+        .valgrind = valgrind_ok,
+    });
+    ctgrind_mod.addImport("slh_dsa", slh_dsa_mod);
+
+    const ctgrind_exe = b.addExecutable(.{
+        .name = "slh-dsa-ctgrind",
+        .root_module = ctgrind_mod,
+    });
+    // Installed so the workflow can invoke it under Valgrind at a stable path.
+    b.installArtifact(ctgrind_exe);
+
+    // Negative control: deliberately branches on tainted data, so Valgrind MUST
+    // flag it. The workflow runs it expecting failure — this proves the taint
+    // machinery is live (guarding against the vacuous-gate failure mode above),
+    // which matters because Valgrind can't run on the maintainer's macOS box.
+    const ctgrind_negctl_mod = b.createModule(.{
+        .root_source_file = b.path("tests/ctgrind/negative_control.zig"),
+        .target = target,
+        .optimize = optimize,
+        .valgrind = valgrind_ok,
+    });
+    const ctgrind_negctl_exe = b.addExecutable(.{
+        .name = "slh-dsa-ctgrind-negctl",
+        .root_module = ctgrind_negctl_mod,
+    });
+    b.installArtifact(ctgrind_negctl_exe);
+
+    const run_ctgrind = b.addRunArtifact(ctgrind_exe);
+    const ctgrind_step = b.step("ctgrind", "Build & run the constant-time (ctgrind) harness");
+    ctgrind_step.dependOn(&run_ctgrind.step);
+    // Ensure `zig build ctgrind` also builds the negative control for the CI
+    // Valgrind pass (running it directly, without Valgrind, would prove nothing).
+    ctgrind_step.dependOn(&ctgrind_negctl_exe.step);
+
+    // ---------------------------------------------------------------------
     // Benchmarks — pinned to ReleaseFast unless overridden.
     // ---------------------------------------------------------------------
 
