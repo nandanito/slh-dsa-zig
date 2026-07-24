@@ -1,42 +1,40 @@
 name: fuzz
 
-# Fuzz testing driven by Zig's built-in fuzzer (`zig build test --fuzz`,
-# Zig 0.14+) and a dedicated `fuzz` step in `build.zig` to be added once
-# the scheme implementation lands.
+# Coverage-guided fuzzing of the attacker-facing surfaces (SLH-DSA `verify`
+# and the ACVP vector parser) via Zig's built-in fuzzer. See issue #9 and
+# tests/fuzz/README.md.
 #
-# Strategy:
+# GitHub Actions caps a single job at 6h, so "≥24h in CI" is not a single
+# run. Instead this gate is *cumulative*: a nightly window fuzzes for a few
+# hours, the corpus + coverage are persisted across runs (actions/cache), and
+# a running total of fuzz-hours is tracked in the job summary. A component
+# graduates once its cumulative time clears the bar.
 #
-#   - On pull requests, run a *short* (~10 min) smoke fuzz so PRs that
-#     introduce obvious crashes don't merge silently.
-#   - Weekly, run a long (6h) sweep against the union of all parameter
-#     sets. Upload the corpus + any minimised crashers as artifacts.
-#   - Anyone can trigger a manual run via workflow_dispatch with a
-#     configurable duration.
+# Mechanics worth knowing (all verified against Zig 0.16.0):
 #
-# Targets (planned, will be added to `build.zig` alongside the
-# implementation):
-#
-#   zig build fuzz_verify   — feed arbitrary bytes to `Slh_Dsa.verify`.
-#                              Property: never panic, never accept.
-#   zig build fuzz_decode   — feed arbitrary bytes to the ADRS / signature
-#                              parsers. Property: never panic.
-#
-# Status: SKELETON. Today the workflow only confirms the build still
-# produces the test binary. The actual `fuzz` step is a TODO in
-# `build.zig`.
+#   - The stock 0.16.0 test runner does NOT compile in fuzz mode; the repo
+#     ships a vendored, patched runner (tests/fuzz/test_runner.zig) wired in
+#     via build.zig. `zig build fuzz --fuzz=N` is the headless entry point.
+#   - `zig build fuzz --fuzz=N` exits 0 EVEN WHEN it finds a crash. It writes
+#     the crashing input to `.zig-cache/f/crash` and logs it, but the process
+#     return code is success. So a crash MUST be detected out-of-band — this
+#     workflow deletes any stale marker up front and fails if one reappears.
+#   - Corpus lives in `.zig-cache/f/`, coverage maps in `.zig-cache/v/`; both
+#     are written incrementally, so a `timeout`-terminated run still leaves a
+#     consistent, durable corpus.
 
 on:
   pull_request:
     branches: [main]
   schedule:
-    # Saturday 02:00 UTC — out of the way of the weekly ctgrind run.
-    - cron: '0 2 * * 6'
+    # Nightly 03:00 UTC — clear of the weekly Saturday 02:00 ctgrind run.
+    - cron: '0 3 * * *'
   workflow_dispatch:
     inputs:
       duration_seconds:
         description: 'Fuzz duration in seconds (manual runs only)'
         required: false
-        default: '600'
+        default: '1800'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -46,7 +44,8 @@ jobs:
   fuzz:
     name: fuzz (${{ github.event_name }})
     runs-on: ubuntu-latest
-    timeout-minutes: 420  # 7h — enough headroom for the 6h scheduled run.
+    # 4h ceiling: comfortably above the 3h scheduled window, under the 6h cap.
+    timeout-minutes: 240
     steps:
       - uses: actions/checkout@v4
 
@@ -55,44 +54,141 @@ jobs:
         with:
           version: 0.16.0
 
-      - name: Determine fuzz duration
-        id: duration
+      - name: Determine run parameters
+        id: cfg
         shell: bash
         run: |
+          set -euo pipefail
           case "${{ github.event_name }}" in
             pull_request)
-              echo "secs=600"     >> "$GITHUB_OUTPUT"   # 10 min smoke
+              secs=300      # 5-min regression smoke; does not persist corpus.
+              persist=false
               ;;
             schedule)
-              echo "secs=21600"   >> "$GITHUB_OUTPUT"   # 6h weekly
+              secs=10800    # 3h nightly window.
+              persist=true
               ;;
             workflow_dispatch)
-              echo "secs=${{ github.event.inputs.duration_seconds }}" >> "$GITHUB_OUTPUT"
+              secs="${{ github.event.inputs.duration_seconds }}"
+              persist=true
               ;;
           esac
+          echo "secs=$secs"       >> "$GITHUB_OUTPUT"
+          echo "persist=$persist" >> "$GITHUB_OUTPUT"
 
-      - name: Build (ensures targets are wired)
-        run: zig build
+      # Restore the accumulated corpus, coverage maps, and fuzz-hours counter.
+      # The key is unique per run so a fresh entry is always saved on scheduled
+      # runs, while `restore-keys` pulls the most recent prior corpus — this is
+      # the standard accumulating-cache pattern. PRs restore (read) but never
+      # save, so they start from the latest main-branch corpus.
+      - name: Restore fuzz corpus
+        id: restore
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            .zig-cache/f
+            .zig-cache/v
+            fuzz-stats
+          key: fuzz-corpus-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            fuzz-corpus-
 
-      # The actual fuzz invocation will look something like:
-      #
-      #   timeout "${{ steps.duration.outputs.secs }}" \
-      #     zig build fuzz --summary all || true
-      #
-      # `|| true` because `timeout` exits non-zero when it terminates the
-      # process, which is the *expected* path for a time-limited fuzz
-      # run with no crashes.
-      #
-      # Until the fuzz step exists in build.zig, run the unit tests as a
-      # placeholder so the workflow has a deterministic green state.
-      - name: Run fuzz (placeholder — invokes unit tests for now)
+      # A crash marker is a single fixed file (`.zig-cache/f/crash`). Delete any
+      # copy restored from the cache so that its presence AFTER this run
+      # unambiguously means a crash was found in THIS run — a bug already fixed
+      # in the tree must not keep the gate red forever.
+      - name: Clear stale crash marker
+        shell: bash
+        run: rm -f .zig-cache/f/crash
+
+      # Compile the fuzz targets and smoke-run each once (empty input). This
+      # runs WITHOUT `|| true`, so a broken harness or a bug reachable from the
+      # empty input fails the job here — the timed run below swallows
+      # `timeout`'s exit code and could otherwise mask a compile failure.
+      - name: Build & smoke-run fuzz targets
+        run: zig build fuzz --summary all
+
+      - name: Fuzz
+        id: fuzz
         shell: bash
         run: |
-          secs="${{ steps.duration.outputs.secs }}"
-          echo "fuzz placeholder; planned duration ${secs}s"
-          zig build test --summary all
+          set -euo pipefail
+          secs='${{ steps.cfg.outputs.secs }}'
+          echo "Fuzzing for ${secs}s (zig build fuzz --fuzz)"
+          # `--fuzz` takes an iteration ceiling, not a time limit, so set it far
+          # above what the window can reach and let `timeout` bound the wall
+          # clock.
+          start=$SECONDS
+          rc=0
+          timeout "${secs}" zig build fuzz --fuzz=1000000000 --summary all || rc=$?
+          elapsed=$(( SECONDS - start ))
+          echo "elapsed=${elapsed}" >> "$GITHUB_OUTPUT"
+          # Exit-code triage. This build is compiled with `-ffuzz`, unlike the
+          # non-`--fuzz` smoke above, so a fuzz-mode-only compile break surfaces
+          # ONLY here — do not blanket-swallow it.
+          #   124 : `timeout` terminated the run at the time limit (expected).
+          #     0 : the iteration ceiling was reached, or — note — a crash was
+          #         found (`--fuzz` exits 0 even on a crash; caught via the
+          #         marker below).
+          #  else : a real failure (fuzz-mode compile error, runner abort). Fail.
+          if [ "$rc" -ne 0 ] && [ "$rc" -ne 124 ]; then
+            echo "::error::fuzz run failed with exit ${rc} (not a timeout)"
+            exit "$rc"
+          fi
+          if [ -f .zig-cache/f/crash ]; then
+            echo "crashed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "crashed=false" >> "$GITHUB_OUTPUT"
+          fi
 
-      - name: Upload corpus & crashers (if any)
+      - name: Update cumulative fuzz-hours
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p fuzz-stats
+          counter=fuzz-stats/cumulative-seconds.txt
+          prev=$(cat "$counter" 2>/dev/null || echo 0)
+          elapsed='${{ steps.fuzz.outputs.elapsed }}'
+          crashed='${{ steps.fuzz.outputs.crashed }}'
+          # The counter measures CRASH-FREE fuzz time toward the 24h gate, so it
+          # accrues only when a persisting run (scheduled/manual, not PR smoke)
+          # finished without a crash. A crash-finding run's time does not count
+          # — otherwise the gate could be cleared without 24h of clean fuzzing.
+          if [ "${{ steps.cfg.outputs.persist }}" = 'true' ] && [ "$crashed" != 'true' ]; then
+            total=$(( prev + elapsed ))
+          else
+            total=$prev
+          fi
+          echo "$total" > "$counter"
+          hours=$(awk "BEGIN { printf \"%.1f\", $total / 3600 }")
+          note=""
+          if [ "$crashed" = 'true' ]; then note=" (crash found — not counted)"; fi
+          {
+            echo "### Fuzzing summary"
+            echo ""
+            echo "| metric | value |"
+            echo "| --- | --- |"
+            echo "| this run | ${elapsed}s${note} |"
+            echo "| cumulative (crash-free) | ${total}s (~${hours}h) |"
+            echo "| targets | verify (SHAKE-128f, SHA2-128f), ACVP parser, hexDecode |"
+            echo "| gate | 24h cumulative → component graduates |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "Cumulative crash-free fuzz time: ${total}s (~${hours}h)${note}"
+
+      # Persist the grown corpus + counter (scheduled / manual runs only).
+      # Runs before the crash gate so a crash-finding run still saves its
+      # coverage progress.
+      - name: Save fuzz corpus
+        if: always() && steps.cfg.outputs.persist == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            .zig-cache/f
+            .zig-cache/v
+            fuzz-stats
+          key: fuzz-corpus-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Upload corpus & crashers
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -100,6 +196,13 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
           path: |
-            .zig-cache/fuzz/**
-            fuzz-corpus/**
-            crashers/**
+            .zig-cache/f/**
+            .zig-cache/v/**
+
+      - name: Fail if a crash was found
+        if: steps.fuzz.outputs.crashed == 'true'
+        shell: bash
+        run: |
+          echo "::error::Fuzzing found a crash. The reproducing input is saved as"
+          echo "::error::.zig-cache/f/crash and uploaded in the fuzz-corpus artifact."
+          exit 1

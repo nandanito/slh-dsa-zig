@@ -92,7 +92,7 @@ These are non-negotiable for code in `src/`:
 | **No allocations in hot paths** | Stack buffers, comptime sizing, explicit lifetimes. Heap use must be justified and documented. |
 | **Zeroize secrets** | Every secret cleared before scope exit. Use volatile semantics where the compiler may DCE the zeroing. |
 | **KAT-validated** | Scheme-level operations (keyGen/sigGen/sigVer) must pass NIST ACVP vectors before being declared functional. Components without NIST vectors (WOTS+, XMSS, FORS internals) are validated via the scheme-level KATs that exercise them, spec-derived property tests, and reference-derived intermediate fixtures where needed (issue #7). |
-| **Fuzzed** | Every parser, deserializer, and public API gets a fuzz harness running ≥24h in CI. |
+| **Fuzzed** | Every parser, deserializer, and attacker-facing API gets a `std.testing.fuzz` harness. The 6h GHA job cap means the gate is *cumulative*: a nightly workflow fuzzes a bounded window, persists the corpus, and accrues ≥24h total before a component graduates. See `tests/fuzz/` and issue #9. |
 | **Benchmarked** | Performance must be within 2× of PQClean's portable `clean` C reference on equivalent hardware (AVX2 reported, not gated). See `bench/README.md`. |
 | **ctgrind/valgrind-verified** | Constant-time properties empirically verified, not just claimed. |
 
@@ -279,7 +279,7 @@ six phase gates:
 
 1. **Functional** — KATs pass on x86_64 and ARM64.
 2. **Constant-time** — ctgrind/valgrind clean on hot paths.
-3. **Fuzz** — 24h of fuzzing surfaces no crashes.
+3. **Fuzz** — ≥24h *cumulative* fuzzing (nightly, corpus persisted) surfaces no crashes.
 4. **Benchmark** — within 2× of PQClean reference on equivalent hardware.
 5. **Documentation** — README, inline docs, examples up to date.
 6. **Banner** — `🚧 EXPERIMENTAL` remains prominent until specific

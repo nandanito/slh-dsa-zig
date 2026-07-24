@@ -35,12 +35,24 @@ pub fn build(b: *std.Build) void {
     });
     b.installArtifact(lib);
 
+    // Vendored, patched default test runner. Stock Zig 0.16.0 fails to compile
+    // any test binary in fuzz mode (`--fuzz`); this copy carries a one-spot
+    // fix. See tests/fuzz/test_runner.zig and issue #9. Every test artifact
+    // uses it so that `zig build test --fuzz` never trips the stock compile
+    // bug (it will instead report "no fuzz tests found" — the harnesses live
+    // behind `zig build fuzz`).
+    const fuzz_runner: std.Build.Step.Compile.TestRunner = .{
+        .path = b.path("tests/fuzz/test_runner.zig"),
+        .mode = .server,
+    };
+
     // ---------------------------------------------------------------------
     // Unit tests against the library module.
     // ---------------------------------------------------------------------
 
     const lib_tests = b.addTest(.{
         .root_module = slh_dsa_mod,
+        .test_runner = fuzz_runner,
     });
     const run_lib_tests = b.addRunArtifact(lib_tests);
 
@@ -76,9 +88,50 @@ pub fn build(b: *std.Build) void {
     // test` so they run in CI alongside the library suite.
     const kat_tests = b.addTest(.{
         .root_module = kat_mod,
+        .test_runner = fuzz_runner,
     });
     const run_kat_tests = b.addRunArtifact(kat_tests);
     test_step.dependOn(&run_kat_tests.step);
+
+    // ---------------------------------------------------------------------
+    // Fuzz harnesses — `std.testing.fuzz` targets over the attacker-facing
+    // surfaces (verify, the ACVP parser). FIPS 205 §9.3/§10.3. See issue #9.
+    //
+    //   zig build fuzz            — smoke: each target once with empty input.
+    //   zig build fuzz --fuzz=N   — coverage-guided fuzzing, up to N runs.
+    //
+    // The harness imports the KAT runner, so it needs the same `slh_dsa`
+    // import kat_mod carries.
+    // ---------------------------------------------------------------------
+
+    // The harness lives under tests/fuzz/, so it cannot reach tests/kat_main.zig
+    // with a relative import (that escapes its module root). Expose the KAT
+    // driver as a named module instead; the harness fuzzes its real
+    // `runVectors` walker and reaches the parser primitives via `kat.runner`.
+    // A dedicated module instance carries its own `slh_dsa` import.
+    const kat_main_mod = b.createModule(.{
+        .root_source_file = b.path("tests/kat_main.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    kat_main_mod.addImport("slh_dsa", slh_dsa_mod);
+
+    const fuzz_mod = b.createModule(.{
+        .root_source_file = b.path("tests/fuzz/harness.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    fuzz_mod.addImport("slh_dsa", slh_dsa_mod);
+    fuzz_mod.addImport("kat", kat_main_mod);
+
+    const fuzz_tests = b.addTest(.{
+        .root_module = fuzz_mod,
+        .test_runner = fuzz_runner,
+    });
+    const run_fuzz_tests = b.addRunArtifact(fuzz_tests);
+
+    const fuzz_step = b.step("fuzz", "Run fuzz harnesses (add --fuzz=N for coverage-guided fuzzing)");
+    fuzz_step.dependOn(&run_fuzz_tests.step);
 
     // ---------------------------------------------------------------------
     // Benchmarks — pinned to ReleaseFast unless overridden.

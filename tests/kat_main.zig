@@ -21,7 +21,10 @@
 //! Lane: Lane A (test infrastructure).
 
 const std = @import("std");
-const runner = @import("kat_runner.zig");
+/// Re-exported so the fuzz harness (tests/fuzz/harness.zig) can reach the ACVP
+/// parser primitives and `VectorType` through the same module instance it
+/// drives `runVectors` with. See issue #9.
+pub const runner = @import("kat_runner.zig");
 const slh_dsa = @import("slh_dsa");
 
 test {
@@ -131,7 +134,10 @@ fn optContext(
 /// vector, and accumulate a summary. All field accesses go through the
 /// typed accessors in kat_runner so malformed files produce
 /// `error.MalformedVectorFile` instead of a union-access panic.
-fn runVectors(
+///
+/// `pub` so the fuzz harness (issue #9) can exercise this exact walker on
+/// adversarial JSON — it is the real parser of untrusted ACVP vector files.
+pub fn runVectors(
     allocator: std.mem.Allocator,
     root_value: std.json.Value,
     mode: runner.VectorType,
