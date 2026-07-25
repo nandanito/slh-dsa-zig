@@ -264,6 +264,17 @@ by the KAT runs.
 
 No shared library. No DLL. No FFI surface. Use it from Zig.
 
+The documentation site is built separately with mkdocs (docs-only Python tooling, pinned in
+`docs/requirements.txt`; never imported by the library):
+
+- `mkdocs build --strict` → `site/` (what CI publishes to GitHub Pages).
+- `mkdocs serve` → local preview on `127.0.0.1:8000`.
+
+**Division of responsibility:** this file is the authority on *code structure* — layering,
+encodings, the hash-adapter contract. The [documentation site](https://nandan.me/slh-dsa-zig/)
+(`docs/`, issue #36) is the authority on *concepts* — why hash-based signatures exist, how each
+component works, and the glossary. The site links here rather than restating the structure.
+
 ## Upstream-candidate tree
 
 The `upstream-candidate/` directory is a separate Lane B work area. Its layout deliberately

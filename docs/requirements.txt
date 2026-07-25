@@ -1,0 +1,20 @@
+# Documentation toolchain for the slh-dsa-zig learning site.
+#
+# This is DOCS-ONLY tooling. Nothing here is imported by, linked into, or
+# required to build the library — `zig build`, `zig build test`, `zig build
+# kat`, `zig build bench` and `zig build fuzz` all work with no Python
+# installed at all. The project's "Zig standard library only, no
+# dependencies" rule applies to `src/` and is unaffected by this file.
+#
+# Usage:
+#   python3 -m venv .venv
+#   .venv/bin/pip install -r docs/requirements.txt
+#   .venv/bin/mkdocs serve      # http://127.0.0.1:8000
+#
+# Pinned to exact versions so a docs build is reproducible and CI cannot
+# drift out from under a working local build. Bump deliberately.
+
+mkdocs==1.6.1
+mkdocs-material==9.7.7
+mkdocs-material-extensions==1.3.1
+pymdown-extensions==11.0.1

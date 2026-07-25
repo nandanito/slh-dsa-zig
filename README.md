@@ -9,10 +9,17 @@ stateless hash-based post-quantum signature scheme also known as SPHINCS+.
 
 > 🚧 **EXPERIMENTAL — DO NOT USE IN PRODUCTION.**
 >
-> This library is under active development. The cryptographic core is **not yet implemented**,
-> has **not been audited**, and is not constant-time verified. The repository is published
-> openly to support deep learning, public review, and eventual upstream contribution. Do not
-> use it to protect anything you care about.
+> This library is under active development. The cryptographic core is implemented and passes
+> the NIST ACVP vectors for all 12 parameter sets, but it has **not been audited**, and
+> constant-time verification is only partially complete (secret-processing primitives are
+> verified; the full signing path is not — see [#34](https://github.com/nandanito/slh-dsa-zig/issues/34)).
+> Passing KATs proves conformance to the spec, not resistance to an attacker. The repository is
+> published openly to support deep learning, public review, and eventual upstream contribution.
+> Do not use it to protect anything you care about.
+
+📖 **[Documentation site](https://nandan.me/slh-dsa-zig/)** — a learning-oriented
+guide to SLH-DSA: why hash-based signatures exist, how each component works, per-module
+walkthroughs mapped to FIPS 205, and a glossary. Built from [`docs/`](docs/).
 
 ## Why this exists
 
@@ -228,12 +235,20 @@ arrives as early as possible (see issue #7):
 
 **Milestone 3 — hardening and release:**
 
-- [ ] Constant-time audit pass (ctgrind / valgrind)
-- [ ] Fuzz harnesses + cumulative nightly fuzzing (issue #9)
-- [ ] Benchmark suite + pinned PQClean comparison (issue #10)
+- [x] Fuzz harnesses + cumulative nightly fuzzing (issue #9) — harnesses and the
+      nightly workflow are merged; the 24h cumulative accrual itself runs in CI
+- [ ] Constant-time audit pass (ctgrind / valgrind) — component-level pass merged
+      (secret-processing primitives, both hash families); whole-signing audit
+      needs in-library declassify hooks (issue #34)
+- [ ] Benchmark suite + pinned PQClean comparison (issue #10) — harness merged and
+      the 2× gate pinned to PQClean `clean`; published numbers pending
 - [ ] Upstream temperature check before Lane B starts (issue #11)
 - [ ] First tagged release (`v0.1.0` — experimental)
 - [ ] Upstream PR draft to `std.crypto.sign.slh_dsa`
+
+Documentation is tracked separately: the learning-oriented
+[documentation site](https://nandan.me/slh-dsa-zig/) (issue #36) covers the
+design rationale, per-component walkthroughs, and a glossary.
 
 Phases 2 and 3 (`pq-nacl`, `agez`) are tracked in the parent [pq-zig](https://github.com/nandanito)
 organisation.

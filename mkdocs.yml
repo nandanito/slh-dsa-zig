@@ -1,0 +1,153 @@
+site_name: slh-dsa-zig
+site_description: >-
+  A learning-oriented guide to SLH-DSA (FIPS 205) and its pure-Zig
+  implementation — why hash-based signatures exist, how each component works,
+  and how the spec maps onto the code.
+site_url: https://nandan.me/slh-dsa-zig/
+site_author: Nandan
+
+repo_url: https://github.com/nandanito/slh-dsa-zig
+repo_name: nandanito/slh-dsa-zig
+edit_uri: edit/main/docs/
+
+copyright: Licensed 0BSD. FIPS 205 is a U.S. government publication in the public domain.
+
+docs_dir: docs
+
+# Link hygiene. With `mkdocs build --strict` (what CI runs) these become hard
+# errors, so a renamed page or a stale `#anchor` fails the build instead of
+# shipping a dead link. `anchors` requires mkdocs >= 1.6.
+validation:
+  omitted_files: warn
+  absolute_links: warn
+  unrecognized_links: warn
+  anchors: warn
+
+theme:
+  name: material
+  language: en
+  icon:
+    repo: fontawesome/brands/github
+  palette:
+    - media: "(prefers-color-scheme)"
+      toggle:
+        icon: material/brightness-auto
+        name: Follow system theme
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.instant.progress
+    - navigation.tracking
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - navigation.indexes
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+    - content.action.edit
+
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+      toc_depth: 3
+  - pymdownx.betterem
+  - pymdownx.caret
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.mark
+  - pymdownx.smartsymbols
+  - pymdownx.tilde
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+# Formulas in these docs are written as inline code or fenced blocks rather
+# than LaTeX. SLH-DSA's arithmetic is elementary (ceilings, powers of two,
+# a digit sum), so a math renderer would add a JavaScript dependency for no
+# real gain. Adding pymdownx.arithmatex + MathJax later is a config-only
+# change if that ever stops being true.
+
+nav:
+  - Home: index.md
+  - Why:
+      - why/index.md
+      - Why post-quantum: why/post-quantum.md
+      - Why hash-based: why/hash-based.md
+  - How it works:
+      - concepts/index.md
+      - 1. One-time signatures: concepts/one-time-signatures.md
+      - 2. Winternitz and WOTS+: concepts/wots.md
+      - 3. Merkle trees: concepts/merkle-trees.md
+      - 4. XMSS: concepts/xmss.md
+      - 5. The statefulness problem: concepts/statefulness.md
+      - 6. FORS: concepts/fors.md
+      - 7. The hypertree: concepts/hypertree.md
+      - 8. Putting it together: concepts/assembly.md
+  - Components:
+      - components/index.md
+      - Parameter sets: components/parameters.md
+      - Addresses (ADRS): components/adrs.md
+      - The hash interface: components/hashing.md
+      - WOTS+: components/wots.md
+      - XMSS: components/xmss.md
+      - Hypertree: components/hypertree.md
+      - FORS: components/fors.md
+      - The top-level scheme: components/scheme.md
+  - Implementation:
+      - implementation/index.md
+      - Comptime parameterisation: implementation/comptime.md
+      - Constant-time discipline: implementation/constant-time.md
+      - How this is tested: implementation/testing.md
+      - The two-lane rule: implementation/lanes.md
+  - Glossary: glossary.md
+  - Reference:
+      - reference/index.md
+      - Parameter set tables: reference/parameter-sets.md
+      - FIPS 205 map: reference/spec-map.md
+      - Further reading: reference/further-reading.md
+
+extra:
+  status:
+    experimental: Experimental
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/nandanito/slh-dsa-zig
+      name: slh-dsa-zig on GitHub
+
+watch:
+  - README.md
+  - ARCHITECTURE.md
