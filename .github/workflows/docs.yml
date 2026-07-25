@@ -52,6 +52,21 @@ jobs:
       - name: Build
         run: mkdocs build --strict
 
+      # `--strict` cannot catch an unrendered icon shortcode: `:material-foo:`
+      # left as literal text is perfectly valid markdown, so mkdocs has no
+      # reason to warn. It shipped to production exactly once for that reason.
+      # Assert the built HTML contains no leftover shortcodes.
+      - name: Assert icon shortcodes rendered
+        run: |
+          leaked=$(grep -roE ':material-[a-z0-9-]+:|:fontawesome-[a-z0-9-]+:' site --include='*.html' || true)
+          if [ -n "$leaked" ]; then
+            echo "::error::Unrendered icon shortcodes in the built site."
+            echo "pymdownx.emoji is probably missing or misconfigured in mkdocs.yml."
+            echo "$leaked" | sort -u
+            exit 1
+          fi
+          echo "No unrendered icon shortcodes."
+
       - name: Upload Pages artifact
         # Only needed for the deploy job, which runs on main only.
         if: github.event_name != 'pull_request'
