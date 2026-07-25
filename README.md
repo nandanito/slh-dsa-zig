@@ -17,7 +17,7 @@ stateless hash-based post-quantum signature scheme also known as SPHINCS+.
 > published openly to support deep learning, public review, and eventual upstream contribution.
 > Do not use it to protect anything you care about.
 
-📖 **[Documentation site](https://nandanito.github.io/slh-dsa-zig/)** — a learning-oriented
+📖 **[Documentation site](https://nandan.me/slh-dsa-zig/)** — a learning-oriented
 guide to SLH-DSA: why hash-based signatures exist, how each component works, per-module
 walkthroughs mapped to FIPS 205, and a glossary. Built from [`docs/`](docs/).
 
@@ -247,7 +247,7 @@ arrives as early as possible (see issue #7):
 - [ ] Upstream PR draft to `std.crypto.sign.slh_dsa`
 
 Documentation is tracked separately: the learning-oriented
-[documentation site](https://nandanito.github.io/slh-dsa-zig/) (issue #36) covers the
+[documentation site](https://nandan.me/slh-dsa-zig/) (issue #36) covers the
 design rationale, per-component walkthroughs, and a glossary.
 
 Phases 2 and 3 (`pq-nacl`, `agez`) are tracked in the parent [pq-zig](https://github.com/nandanito)

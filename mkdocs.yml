@@ -3,7 +3,7 @@ site_description: >-
   A learning-oriented guide to SLH-DSA (FIPS 205) and its pure-Zig
   implementation — why hash-based signatures exist, how each component works,
   and how the spec maps onto the code.
-site_url: https://nandanito.github.io/slh-dsa-zig/
+site_url: https://nandan.me/slh-dsa-zig/
 site_author: Nandan
 
 repo_url: https://github.com/nandanito/slh-dsa-zig
