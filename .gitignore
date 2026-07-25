@@ -12,6 +12,10 @@ zig-out/
 *.swp
 *~
 
+# Docs site build output + local docs venv (mkdocs; docs-only tooling)
+site/
+.venv/
+
 # Local vectors / scratch
 tests/vectors/*.json
 tests/vectors/*.gz

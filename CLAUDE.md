@@ -223,6 +223,11 @@ tests/            ← Lane A test infrastructure (KAT runner + main).
 bench/            ← Lane A benchmarks.
 examples/         ← Lane A runnable examples demonstrating the API.
 
+docs/             ← Lane A mkdocs learning site (concepts, components, glossary).
+  requirements.txt  ← PINNED docs-only Python tooling. Never imported by src/;
+                      `zig build` must keep working with no Python installed.
+mkdocs.yml        ← site config (repo root — standard mkdocs layout).
+
 upstream-candidate/  ← Lane B. OFF-LIMITS for code authorship.
 
 .github/workflows/   ← CI: ci.yml, ctgrind.yml, fuzz.yml.
@@ -233,6 +238,9 @@ When adding a new source file:
 - Test infrastructure → `tests/<name>.zig`.
 - Examples → `examples/<name>.zig` and wire into `build.zig` via `addExample(...)`.
 - Benchmarks → extend `bench/bench.zig`, don't add new top-level bench files.
+- Docs pages → `docs/<section>/<name>.md` and add to `nav:` in `mkdocs.yml`.
+  Verify with `mkdocs build --strict` (CI runs it; anchor validation is on, so a
+  stale `#anchor` fails the build).
 
 ---
 
