@@ -50,7 +50,7 @@ post-quantum cryptography effort in Zig, and the direct successor to
 | SLH-DSA sign / verify | FIPS 205 §9.2–9.3, §10 | ✅ ACVP sigGen/sigVer KATs pass (all 12 sets, internal + external) · pre-hash deferred |
 | NIST ACVP KAT runner | — | ✅ keyGen · sigGen · sigVer modes (pre-hash groups skipped) |
 | Benchmarks vs PQClean | — | 🚧 Harness wired (real keygen/sign/verify); pinned `clean` gate + published numbers pending (#10) |
-| Constant-time verification | ctgrind / valgrind | ⏳ Planned |
+| Constant-time verification | ctgrind / valgrind | 🚧 WOTS+/FORS secret-processing primitives verified constant-time under Valgrind, both hash families (#34); full-sign audit deferred |
 | Fuzz harnesses | std.testing.fuzz | 🚧 Harnesses wired (verify, ACVP parser); cumulative nightly fuzzing accruing toward the 24h gate (#9) |
 
 Legend: ✅ implemented and tested · 🚧 skeleton / in progress · ⏳ planned · ❌ not started

@@ -1,24 +1,19 @@
 name: ctgrind
 
-# Constant-time validation using ctgrind, a Valgrind-based tool by Adam
-# Langley that detects branches and memory accesses dependent on tainted
-# (secret) data. See:
+# Constant-time validation with Valgrind's memcheck, in the style of Adam
+# Langley's ctgrind (https://github.com/agl/ctgrind): mark secret data as
+# "undefined", then any branch or memory access that depends on it is reported
+# as a use-of-uninitialised-value error.
 #
-#   https://github.com/agl/ctgrind
+# The taint markers are Valgrind client requests issued via `std.valgrind`
+# (pure Zig inline asm — no C shim, no <valgrind/memcheck.h>). The harness
+# `tests/ctgrind/taint_components.zig` taints SK.seed and runs the
+# secret-processing primitives (WOTS+ pkGen, FORS node); `negative_control.zig`
+# proves the taint is live. See issue #34 for the taint model and the deferred
+# whole-sign coverage.
 #
-# Why a separate workflow?
-#
-#   - ctgrind needs a Valgrind that has been patched to expose the
-#     client request `VALGRIND_MAKE_MEM_UNDEFINED` (and Langley's helper
-#     macros). Building this lives outside the hot CI loop.
-#   - Constant-time issues are subtle and best surfaced as a dedicated
-#     status check, not folded into "tests passed".
-#
-# Status: SKELETON. Until the scheme bodies and their ctgrind
-# annotations land, this job runs Valgrind on the unit tests as a smoke
-# check that the toolchain is wired up. The real annotations (marking
-# `SK.seed`, `SK.prf`, FORS leaves, etc. as secret) will be added
-# alongside the crypto implementation in Lane A.
+# Why a separate workflow: constant-time issues are subtle and best surfaced
+# as a dedicated check, and Valgrind's slowdown keeps it out of the hot loop.
 
 on:
   pull_request:
@@ -34,7 +29,7 @@ concurrency:
 
 jobs:
   ctgrind:
-    name: ctgrind smoke
+    name: ctgrind
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -49,52 +44,65 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y valgrind
 
-      # The ctgrind helpers live in <valgrind/memcheck.h> as the client
-      # request `VALGRIND_MAKE_MEM_UNDEFINED`. Stock Valgrind packages
-      # ship them. When the real annotations land they will live in
-      # `src/ctgrind.zig` and call these macros through `@cImport`.
-      - name: Confirm ctgrind headers present
-        run: |
-          test -f /usr/include/valgrind/memcheck.h
-          echo "valgrind memcheck headers found"
-
       # Pin the target CPU to the x86-64-v3 microarchitecture level (AVX2,
-      # FMA, BMI — but NOT AVX-512). The GitHub x86_64 runners expose
-      # AVX-512, so a `native` build of the now-real SHA-2/SHA-3 code emits
-      # EVEX-encoded 512-bit instructions that the apt Valgrind (3.22) cannot
-      # decode — it SIGILLs before validating anything. v3 keeps realistic
-      # vectorisation while staying within Valgrind's instruction support.
-      # Lift this back to native once Valgrind handles AVX-512 — see #6.
-      - name: Build tests in ReleaseSafe with debug info
+      # FMA, BMI — but NOT AVX-512). The GitHub x86_64 runners expose AVX-512,
+      # so a `native` build of the SHA-2/SHA-3 code emits EVEX-encoded 512-bit
+      # instructions that the apt Valgrind (3.22) cannot decode — it SIGILLs
+      # before validating anything. v3 keeps realistic vectorisation within
+      # Valgrind's instruction support. Lift back to native once Valgrind
+      # handles AVX-512 — see #6.
+      #
+      # ReleaseSafe: optimised (so the audited code is the code that ships)
+      # but with safety checks, and with the constant-time markers active.
+      - name: Build ctgrind harness
         run: |
-          zig build test \
+          zig build ctgrind \
             -Doptimize=ReleaseSafe \
             -Dcpu=x86_64_v3 \
             --summary all
 
-      # Skeleton run: invoke Valgrind on the test binary that `zig build
-      # test` produced. Until secret-data taint is wired in, this only
-      # surfaces ordinary memory errors. A non-zero exit fails the job.
-      - name: Run Valgrind smoke pass
+      # Two Valgrind passes. `--error-exitcode=1` turns any report (a
+      # conditional jump or memory access depending on tainted data) into a
+      # non-zero exit. Neither harness heap-allocates, so leak checking is off.
+      #
+      #   1. Negative control — MUST be flagged. It taints a byte and branches
+      #      on it; a clean run means the std.valgrind client requests are inert
+      #      (the vacuous-gate failure mode), so we fail the job.
+      #   2. Real check — the audited `sign` MUST be clean.
+      - name: Run Valgrind constant-time check
         run: |
-          # Locate the most recently built test binary. zig caches them
-          # under .zig-cache/o/<hash>/test.
-          bin=$(find .zig-cache -name 'test' -type f -executable -printf '%T@ %p\n' \
-                | sort -nr | head -1 | awk '{print $2}')
-          if [ -z "$bin" ]; then
-            echo "::warning::no test binary located; skipping valgrind"
-            exit 0
+          set -euo pipefail
+          find_bin() {
+            find .zig-cache -name "$1" -type f -perm -u+x \
+              -printf '%T@ %p\n' | sort -nr | head -1 | awk '{print $2}'
+          }
+          real=$(find_bin 'slh-dsa-ctgrind')
+          negctl=$(find_bin 'slh-dsa-ctgrind-negctl')
+          if [ -z "$real" ] || [ -z "$negctl" ]; then
+            echo "::error::ctgrind binaries not found (real='$real' negctl='$negctl')"
+            exit 1
           fi
-          echo "running valgrind on $bin"
+
+          echo "== negative control ($negctl): expecting Valgrind to report a leak =="
+          if valgrind --error-exitcode=1 --leak-check=no --track-origins=yes "$negctl"; then
+            echo "::error::negative control was NOT flagged — taint tracking is inert, so the gate is vacuous"
+            exit 1
+          fi
+          echo "negative control correctly flagged; taint tracking is live"
+
+          echo "== constant-time check ($real): expecting a clean run =="
           valgrind \
             --error-exitcode=1 \
             --leak-check=no \
             --track-origins=yes \
-            "$bin"
+            "$real"
 
-      - name: Note on full ctgrind coverage
+      - name: Coverage note
+        if: always()
         run: |
-          echo "::notice::This run is a smoke check. Full constant-time"
-          echo "::notice::validation requires `VALGRIND_MAKE_MEM_UNDEFINED`"
-          echo "::notice::annotations on every secret input. Those land"
-          echo "::notice::alongside the crypto implementation in Lane A."
+          echo "::notice::Verifies SK.seed is not used in any secret-dependent"
+          echo "::notice::branch or memory access in the secret-processing"
+          echo "::notice::primitives (WOTS+ pkGen: PRF + chaining + T_len; FORS"
+          echo "::notice::node: PRF + F + H), for the SHAKE and SHA-2 128f sets."
+          echo "::notice::Deferred (needs in-library declassify hooks for the"
+          echo "::notice::public WOTS+ messages, tracked on #34): the full sign."
