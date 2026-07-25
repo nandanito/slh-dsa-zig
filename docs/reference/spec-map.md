@@ -87,11 +87,18 @@ FIPS 205 §11.2 — Hash functions (SHA-2)         src/hash_sha2.zig
 
 | Alg | § | Name | Implementation |
 |---|---|---|---|
-| 21 | 10.1 | `slh_keygen` | `KeyPair.generate` |
+| 21 | 10.1 | `slh_keygen()` | `KeyPair.generate` |
 | 22 | 10.2 | `slh_sign` | `signWithContext` (and `sign`, `ctx = ""`) |
-| 23 | 10.2 | `hash_slh_sign` | **Deferred** — [decision](../concepts/assembly.md#context-strings) |
+| 23 | 10.2 | `hash_slh_sign(M, ctx, PH, SK)` | **Deferred** — [decision](../concepts/assembly.md#context-strings) |
 | 24 | 10.3 | `slh_verify` | `verifyWithContext` (and `verify`, `ctx = ""`) |
-| 25 | 10.3 | `hash_slh_verify` | **Deferred** |
+| 25 | 10.3 | `hash_slh_verify(M, SIG, ctx, PH, PK)` | **Deferred** |
+
+The two deferred entries carry their full signatures because that is the shape a
+future implementation has to match: `PH` selects the pre-hash function, and its
+identity is bound into the signature via an OID alongside the `0x01` domain
+separator. Note `slh_keygen()` takes no arguments — it draws its three seeds from
+an approved RBG internally, which is why this library's deterministic entry point
+is the §9.1 `KeyPair.fromSeeds` rather than a variant of this one.
 
 ## The six hash functions — §11
 
