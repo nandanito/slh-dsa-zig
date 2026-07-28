@@ -31,7 +31,7 @@ PQCLEAN_URL="${PQCLEAN_URL:-https://github.com/PQClean/PQClean.git}"
 
 WORK="${WORK:-${TMPDIR:-/tmp}/slh-dsa-pqclean-bench}"
 PQCLEAN_DIR="${PQCLEAN_DIR:-$WORK/PQClean}"
-BUILD="$WORK/build"
+# BUILD is fingerprinted below, once CC/flags/commit are known.
 
 CC="${CC:-cc}"
 # PQClean's own Makefile uses -O3; match it for the harness translation unit.
@@ -68,7 +68,7 @@ PARAM_SETS="${PARAM_SETS:-$ALL_PARAM_SETS}"
 # Fetch PQClean at the pinned commit.
 # ---------------------------------------------------------------------------
 
-mkdir -p "$WORK" "$BUILD"
+mkdir -p "$WORK"
 
 if [ ! -d "$PQCLEAN_DIR/.git" ]; then
     echo "==> cloning PQClean into $PQCLEAN_DIR" >&2
@@ -85,6 +85,26 @@ if [ "$CURRENT_REF" != "$PQCLEAN_REF" ]; then
 fi
 
 COMMON="$PQCLEAN_DIR/common"
+
+# ---------------------------------------------------------------------------
+# Build cache, keyed by everything that can change the generated code.
+#
+# The cached objects are SHA-2 and Keccak -- they dominate PQClean's timing.
+# A cache keyed only on source mtime would happily reuse objects built by a
+# different compiler or at different flags while the provenance header above
+# advertises the *current* ones, i.e. report numbers that were never measured
+# under the settings being published. Fingerprinting the directory makes a
+# changed CC, changed flags, or a different PQClean commit land in a
+# different cache rather than silently reusing the old one.
+# ---------------------------------------------------------------------------
+
+FINGERPRINT="$(printf '%s|%s|%s' \
+    "$($CC --version 2>&1 | head -1)" \
+    "$HARNESS_CFLAGS" \
+    "$(git -C "$PQCLEAN_DIR" rev-parse HEAD)" \
+    | cksum | cut -d' ' -f1)"
+BUILD="$WORK/build/$FINGERPRINT"
+mkdir -p "$BUILD"
 
 # ---------------------------------------------------------------------------
 # Provenance header (stderr, so it never contaminates the CSV).
@@ -149,7 +169,15 @@ for ps in $PARAM_SETS; do
     echo "==> $ps (keygen=$keygen_iters sign=$sign_iters verify=$verify_iters)" >&2
 
     # PQClean ships a per-implementation Makefile that already uses -O3.
-    # Build out of tree so the checkout stays clean between runs.
+    #
+    # Clean *before* building, not only after. Relying on the post-run clean
+    # leaves three ways to link a stale archive into a published measurement:
+    # an interrupted previous run, a caller-managed PQCLEAN_DIR that already
+    # had artifacts, or a previous run under a different CC -- `make` would
+    # see up-to-date objects and skip the rebuild in all three. The archives
+    # are small and this costs a couple of seconds per set, which is the
+    # right trade for a number that gets published.
+    make -s -C "$src_dir" clean >/dev/null 2>&1 || true
     make -s -C "$src_dir" CC="$CC" >/dev/null
 
     lib="$src_dir/lib${ps}_clean.a"
