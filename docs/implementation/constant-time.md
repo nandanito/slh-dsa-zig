@@ -87,7 +87,8 @@ valgrind zig-out/bin/slh-dsa-ctgrind-sign    # whole keygen + sign
 
 ### What is covered
 
-Two harnesses, both run for **both hash families** on the 128f sets.
+Two harnesses, each run over four parameter sets — see
+[which sets, and why those](#which-parameter-sets-are-audited) below.
 
 **`tests/ctgrind/taint_components.zig`** taints `SK.seed` and drives the primitives
 that consume it:
@@ -103,14 +104,42 @@ run means exactly one thing — **the primitives are constant-time in the secret
 value.** No interpretation required, and no declassification needed.
 
 **`tests/ctgrind/taint_sign.zig`** taints `SK.seed` *and* `SK.prf` and runs a
-complete key generation (§9.1) and signature (§9.2) — FORS signing, all `d = 22`
-XMSS layers, the hash-family dispatch, and the index arithmetic joining them. A
-clean run means no branch and no memory address anywhere in keygen or sign depends
-on the secret key's value.
+complete key generation (§9.1) and signature (§9.2) — FORS signing, every XMSS
+layer, the hash-family dispatch, and the index arithmetic joining them. A clean
+run means no branch and no memory address anywhere in keygen or sign depends on
+the secret key's value.
 
 Both are kept. The component pass needs no declassification to be meaningful, so
 when something regresses it says *which primitive* broke; the whole-path pass
 covers what their composition adds.
+
+### Which parameter sets are audited
+
+Parameter sets are comptime-monomorphised, so "audited" is a claim about each
+set individually, not about the library in the abstract. The harnesses run four:
+`SHAKE-128f`, `SHA2-128f`, `SHAKE-192f`, `SHA2-192f`.
+
+That choice is not arbitrary — it is the smallest set covering every distinct
+code path:
+
+-   **Both families.** §11.1 SHAKE and §11.2 SHA-2 are separate adapters.
+-   **Both SHA-2 widths.** §11.2 widens `H`, `T_l` and `H_msg` to SHA-512, and
+    `PRF_msg` to HMAC-SHA-512, for categories 3/5 (`n = 24, 32`). A 128f-only
+    audit would never execute any of it — and `SK.prf` is that HMAC's *key*, so
+    the 192f sets are the only ones that audit secret-keyed SHA-512. `n = 32`
+    takes the same branch as `n = 24`, so it would add runtime and no new path.
+
+What the other eight sets vary is public tree geometry (`h`, `d`, `h'`, `a`, `k`)
+and output lengths: loop bounds over values the verifier recomputes, never a new
+branch on secret data. The `f` variants are chosen over `s` because they keep the
+run inside Valgrind's slowdown budget while exercising a *deeper* layer stack
+(`d = 22` against `d = 7`).
+
+!!! note "The honest reading"
+
+    This is a coverage argument, not a proof. It says the audited sets execute
+    every branch the unaudited ones would, which is checkable by reading the
+    adapters — not that the unaudited sets have been run.
 
 ### Declassification: teaching the tool what is public
 

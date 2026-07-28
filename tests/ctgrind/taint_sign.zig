@@ -123,10 +123,23 @@ fn auditKeygenAndSign(comptime param_set: slh_dsa.ParamSet, io: std.Io) !void {
 }
 
 pub fn main(init: std.process.Init) !void {
-    // One target per hash family so both dispatchers (§11.1 SHAKE, §11.2
-    // SHA-2) are audited end to end. The f-variants keep the run inside
-    // Valgrind's slowdown budget while still exercising every layer: d = 22
-    // XMSS trees, so the layer-to-layer root threading is covered.
+    // Parameter sets are comptime-monomorphised, so "audited" is per set. These
+    // four cover every distinct code path in both dispatchers:
+    //
+    //   * both families — §11.1 SHAKE and §11.2 SHA-2.
+    //   * both SHA-2 widths — §11.2 widens H, T_l and H_msg to SHA-512, and
+    //     PRF_msg to HMAC-SHA-512, for categories 3/5 (n = 24, 32). That matters
+    //     here beyond mere coverage: SK.prf is the HMAC *key*, so the 192f set
+    //     is the only one that audits secret-keyed SHA-512. n = 32 takes the
+    //     same branch as n = 24, so it would add cost and no new path.
+    //
+    // What the remaining eight sets vary is public tree geometry (h, d, h', a,
+    // k) and output lengths — loop bounds over values the verifier recomputes,
+    // never a new branch on secret data. The f-variants also keep the run
+    // inside Valgrind's slowdown budget while still exercising the full layer
+    // stack (d = 22 for 128f, 17 for 192f).
     try auditKeygenAndSign(.slh_dsa_shake_128f, init.io);
     try auditKeygenAndSign(.slh_dsa_sha2_128f, init.io);
+    try auditKeygenAndSign(.slh_dsa_shake_192f, init.io);
+    try auditKeygenAndSign(.slh_dsa_sha2_192f, init.io);
 }

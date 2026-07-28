@@ -57,7 +57,7 @@ post-quantum cryptography effort in Zig, and the direct successor to
 | SLH-DSA sign / verify | FIPS 205 §9.2–9.3, §10 | ✅ ACVP sigGen/sigVer KATs pass (all 12 sets, internal + external) · pre-hash deferred |
 | NIST ACVP KAT runner | — | ✅ keyGen · sigGen · sigVer modes (pre-hash groups skipped) |
 | Benchmarks vs PQClean | — | ✅ Published against pinned PQClean `clean` — all 36 measurements inside the 2× gate, worst 1.15× (#10) · SHA-2 sets lean on ARMv8 hardware; x86-64 re-measure open (#40) |
-| Constant-time verification | ctgrind / valgrind | ✅ Key generation + signing verified constant-time in SK.seed/SK.prf under Valgrind, both hash families, plus the WOTS+/FORS primitives in isolation (#34) · x86-64-v3 only; AVX-512 paths open (#6) |
+| Constant-time verification | ctgrind / valgrind | ✅ Key generation + signing verified constant-time in SK.seed/SK.prf under Valgrind, plus the WOTS+/FORS primitives in isolation (#34) · run on SHAKE/SHA2-128f + 192f, which cover every adapter code path (incl. the SHA-512 widening); other sets differ only in public tree geometry · x86-64-v3 only; AVX-512 paths open (#6) |
 | Fuzz harnesses | std.testing.fuzz | 🚧 Harnesses wired (verify, ACVP parser); cumulative nightly fuzzing accruing toward the 24h gate (#9) |
 
 Legend: ✅ implemented and tested · 🚧 skeleton / in progress · ⏳ planned · ❌ not started
