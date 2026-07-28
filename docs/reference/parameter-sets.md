@@ -109,18 +109,18 @@ much lower per-leaf cost).
 | 256s | 2,048 | 8× |
 | 256f | 272 | 1× |
 
-This tracks measurement: on the maintainer's machine (ReleaseFast) SHAKE-128s
-signing runs ≈426 ms against 128f's ≈20 ms — a factor of ~21 against the predicted
-20×. 128f keygen is ≈0.22 ms and verify ≈0.37 ms.
+This tracks measurement. On an Apple M3 Pro (`ReleaseFast`), SHAKE-128s signing
+runs ≈368 ms against SHAKE-128f's ≈19 ms — a factor of ~20, matching the leaf
+count predicted above. SHAKE-128f keygen is ≈0.76 ms and verify ≈1.05 ms.
 
-!!! note "These are indicative, not the benchmark result"
+!!! note "These show the shape; the gate is the benchmark"
 
-    Figures above come from development runs on one Apple-Silicon machine and exist
-    to show the *shape* of the trade-off. The project's actual performance gate —
-    within 2× of PQClean's portable `clean` reference, measured and published on
-    pinned hardware — is tracked in
-    [issue #10](https://github.com/nandanito/slh-dsa-zig/issues/10) and reported in
-    `bench/README.md`. Do not quote these numbers as the benchmark.
+    Figures above come from one Apple-Silicon machine and exist to show the
+    *shape* of the trade-off between parameter sets. The project's performance
+    gate — within 2× of PQClean's portable `clean` reference — is a separate,
+    pinned measurement: 36/36 measurements pass, worst ratio 1.15×, published
+    in [`bench/README.md`](https://github.com/nandanito/slh-dsa-zig/blob/main/bench/README.md)
+    with its provenance and caveats. Quote that, not these.
 
 ## Naming
 
