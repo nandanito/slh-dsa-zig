@@ -70,11 +70,20 @@ static void keep(const void *p, size_t len) {
     sink = (uint8_t)(sink ^ acc);
 }
 
+/* CLOCK_MONOTONIC_RAW is monotonic and, unlike CLOCK_MONOTONIC, not slewed by
+ * NTP -- the better choice for short interval timing. It is a Linux/Darwin
+ * extension rather than POSIX, so fall back where it is absent. run.sh
+ * compiles with -std=gnu99 so the declarations are actually in scope; under
+ * strict -std=c99 glibc hides both clock_gettime and this macro. */
+#if defined(CLOCK_MONOTONIC_RAW)
+#define BENCH_CLOCK CLOCK_MONOTONIC_RAW
+#else
+#define BENCH_CLOCK CLOCK_MONOTONIC
+#endif
+
 static uint64_t now_ns(void) {
     struct timespec ts;
-    /* CLOCK_MONOTONIC_RAW: monotonic, not slewed by NTP. Nanosecond
-     * resolution on Darwin and Linux. */
-    clock_gettime(CLOCK_MONOTONIC_RAW, &ts);
+    clock_gettime(BENCH_CLOCK, &ts);
     return (uint64_t)ts.tv_sec * 1000000000ULL + (uint64_t)ts.tv_nsec;
 }
 

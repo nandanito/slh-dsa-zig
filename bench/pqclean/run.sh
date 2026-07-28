@@ -36,7 +36,17 @@ BUILD="$WORK/build"
 CC="${CC:-cc}"
 # PQClean's own Makefile uses -O3; match it for the harness translation unit.
 # No -flto: the harness must not be able to inline or elide the library calls.
-HARNESS_CFLAGS="${HARNESS_CFLAGS:--std=c99 -O3 -Wall -Wextra}"
+#
+# -std=gnu99 rather than PQClean's -std=c99, for two reasons, both of which
+# only bite on glibc/Linux (the x86-64 re-measure path in issue #40):
+#   - strict c99 defines no feature-test macro, so glibc hides clock_gettime,
+#     struct timespec and CLOCK_MONOTONIC_RAW, and harness.c will not compile;
+#   - PQClean's own common/randombytes.c reaches for SYS_getrandom, which
+#     likewise needs the default (non-strict) namespace.
+# This governs only the harness and the common objects compiled here. Each
+# PQClean implementation library is still built by PQClean's own Makefile at
+# its own -std=c99 -O3, untouched.
+HARNESS_CFLAGS="${HARNESS_CFLAGS:--std=gnu99 -O3 -Wall -Wextra}"
 
 ALL_PARAM_SETS="
 sphincs-sha2-128s-simple
