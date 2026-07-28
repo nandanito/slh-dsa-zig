@@ -87,8 +87,26 @@ each parameter set with PQClean's own `-O3` Makefile, and runs a C harness
 monotonic clock placement, same median-of-N, same 64-byte message, same
 deterministic keypair seeds, same iteration budgets.
 
-`table.sh` exits non-zero if any measurement exceeds the gate, so it is a
-check and not only a formatter.
+`table.sh` is the gate check, not only a formatter:
+
+| exit | meaning |
+|---|---|
+| 0 | a complete result set, every measurement within the gate |
+| 1 | at least one measurement exceeded the gate |
+| 2 | the input could not be gated — see below |
+
+Exit 2 covers the failures that would otherwise *look* like a pass: a CSV
+with no comparable pairs, a `(param_set, op)` carrying one side's row but not
+the other, or fewer measurements than expected. That last one matters more
+than it sounds — a sweep interrupted at a parameter-set boundary leaves every
+surviving pair perfectly intact, so pair-level validation alone would print a
+few green rows and exit 0. `table.sh` therefore requires all 36 measurements
+(12 sets × 3 ops) by default. Gate a deliberate subset by saying so:
+
+```sh
+EXPECT=3 ./bench/pqclean/table.sh < one-param-set.csv
+GATE=1.5 ./bench/pqclean/table.sh < results.csv     # tighter than the project gate
+```
 
 Two design points worth knowing:
 

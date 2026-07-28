@@ -12,21 +12,33 @@
 #
 # This doubles as the gate check rather than being only a formatter:
 #
-#   0  every comparable pair is within the gate
+#   0  a complete result set, every measurement within the gate
 #   1  at least one measurement exceeded the gate
-#   2  the input could not be gated -- no comparable pairs at all, or a
-#      (param_set, op) that has one side's row but not the other
+#   2  the input could not be gated -- no comparable pairs at all, a
+#      (param_set, op) with one side's row but not the other, or fewer
+#      measurements than EXPECT
 #
 # Exit 2 exists because a silently short table is the dangerous failure: an
 # interrupted run would otherwise print three green rows and exit 0.
+#
+# Environment:
+#   GATE    ratio ceiling (default 2.0)
+#   EXPECT  required measurement count (default 36 = 12 sets x 3 ops); set
+#           explicitly to gate a deliberate subset
 #
 # Lane: Lane A (bench infrastructure).
 
 set -euo pipefail
 
 GATE="${GATE:-2.0}"
+# 12 parameter sets x {keygen, sign, verify}. A run that stopped early is the
+# failure this guards: it yields complete *pairs*, just not all of them, so
+# pair-level validation alone would pass it. Set EXPECT explicitly when
+# gating a deliberate subset (e.g. EXPECT=3 for one parameter set, EXPECT=18
+# for the six SHA-2 sets in a portable-only pass).
+EXPECT="${EXPECT:-36}"
 
-awk -F, -v gate="$GATE" '
+awk -F, -v gate="$GATE" -v expect="$EXPECT" '
 function fmt(ns) {
     if (ns < 1000)      return sprintf("%d ns", ns)
     else if (ns < 1e6)  return sprintf("%.2f us", ns / 1000)
@@ -88,8 +100,8 @@ END {
     }
 
     # Supplementary table: only emitted when a portable-build pass is present.
-    have_port = 0
-    for (i = 1; i <= n; i++) if (order[i] in port) have_port = 1
+    have_port = 0; port_rows = 0
+    for (i = 1; i <= n; i++) if (order[i] in port) { have_port = 1; port_rows++ }
     if (have_port) {
         print ""
         print "Portable build (ARMv8 crypto extensions disabled), isolating the"
@@ -128,10 +140,26 @@ END {
     }
 
     # An empty gate table must never look like a pass. Reaching here with no
-    # comparable rows means the CSV was empty or malformed -- a portable-only
-    # run is exempt, having emitted its own table above.
+    # comparable rows means the CSV was empty or malformed.
     if (rows == 0 && !have_port) {
         print "\nerror: no comparable (param_set, op) pairs found in the input." > "/dev/stderr"
+        exit 2
+    }
+
+    # Completeness. Pair-level validation above catches a run that lost one
+    # *side*; it cannot catch a run that stopped cleanly at a parameter-set
+    # boundary, which leaves whole sets absent while every surviving pair is
+    # intact. An interrupted sweep would otherwise print three green rows and
+    # exit 0 -- a short table reading as a pass is the exact failure this
+    # script exists to prevent, so completeness is checked explicitly.
+    #
+    # Counted against whichever table this CSV actually produced: the gate
+    # table normally, the portable table for a supplementary-only pass.
+    actual = (rows > 0) ? rows : port_rows
+    if (actual != expect) {
+        printf "\nerror: expected %d measurements, found %d.\n", expect, actual > "/dev/stderr"
+        print "  An interrupted run yields complete pairs but incomplete coverage." > "/dev/stderr"
+        print "  Re-run the full sweep, or set EXPECT=<n> to gate a deliberate subset." > "/dev/stderr"
         exit 2
     }
 

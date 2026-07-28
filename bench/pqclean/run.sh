@@ -98,7 +98,11 @@ COMMON="$PQCLEAN_DIR/common"
 # different cache rather than silently reusing the old one.
 # ---------------------------------------------------------------------------
 
-FINGERPRINT="$(printf '%s|%s|%s' \
+# The literal $CC string is part of the key, not just its --version line: a
+# wrapper script, or `CC="clang -mcpu=native"`, changes code generation while
+# reporting an identical version.
+FINGERPRINT="$(printf '%s|%s|%s|%s' \
+    "$CC" \
     "$($CC --version 2>&1 | head -1)" \
     "$HARNESS_CFLAGS" \
     "$(git -C "$PQCLEAN_DIR" rev-parse HEAD)" \
@@ -113,7 +117,7 @@ mkdir -p "$BUILD"
 {
     echo "# slh-dsa-zig <-> PQClean clean comparison"
     echo "# pqclean_commit: $(git -C "$PQCLEAN_DIR" rev-parse HEAD)"
-    echo "# cc:             $($CC --version | head -1)"
+    echo "# cc:             $CC — $($CC --version 2>&1 | head -1)"
     echo "# harness_cflags: $HARNESS_CFLAGS"
     echo "# uname:          $(uname -srm)"
     if command -v sysctl >/dev/null 2>&1 && sysctl -n machdep.cpu.brand_string >/dev/null 2>&1; then
