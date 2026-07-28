@@ -3,7 +3,7 @@
 # Drive both sides of the 2x performance gate and emit one joined CSV.
 #
 #   ./bench/pqclean/compare.sh > results.csv
-#   ./bench/pqclean/compare.sh | ./bench/pqclean/table.awk    # markdown table
+#   ./bench/pqclean/compare.sh | ./bench/pqclean/table.sh     # markdown table
 #
 # Why this exists rather than "run each side once":
 #
