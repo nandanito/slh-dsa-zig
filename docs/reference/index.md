@@ -50,7 +50,7 @@ zig build kat -- --mode keygen --vectors tests/vectors/keygen.json
 zig build bench                    # benchmarks (ReleaseFast)
 zig build bench -- --param-set SLH-DSA-SHAKE-128s --op sign
 zig build fuzz                     # fuzz smoke; --fuzz=N for coverage-guided
-zig build ctgrind                  # constant-time harness (run under Valgrind)
+zig build ctgrind                  # constant-time harnesses (run under Valgrind)
 zig build examples                 # all examples
 zig fmt --check .                  # format check (CI enforces)
 ```

@@ -222,9 +222,17 @@ a code comment citing why the secret being accessed is not actually secret in th
 - **Explicit zeroisation.** Sensitive buffers — WOTS+ secret keys, FORS secrets, intermediate
   PRF outputs — are zeroed before scope exit using `std.crypto.utils.secureZero`.
 
-Verification: a separate CI job runs the test suite under `ctgrind`/`valgrind` with the
-secret-data taint annotations and fails if any secret-dependent control flow or memory
-access is observed.
+Verification: a separate CI job (`.github/workflows/ctgrind.yml`) runs dedicated harnesses
+under `ctgrind`/`valgrind` with `SK.seed` and `SK.prf` marked as tainted, and fails if any
+secret-dependent control flow or memory access is observed. Coverage is the
+secret-processing primitives in isolation and a whole key generation + signature, for both
+hash families; a negative control fails the job if the taint markers ever go inert.
+
+Because nearly every intermediate in a signature descends from `SK.seed` while almost none
+are secret, the whole-path audit needs the public ones classified explicitly.
+`src/ct.zig` provides `declassify`, called at the three points where FIPS 205 publishes a
+value — `R` (§9.2), `PK_FORS` (§9.3), and each XMSS root (§7.2). It compiles to nothing
+unless the module is built with Valgrind support, so ordinary builds are unaffected.
 
 ## Test strategy
 
@@ -261,6 +269,8 @@ by the KAT runs.
 - `zig build kat` → `zig-out/bin/slh-dsa-kat` (KAT runner CLI).
 - `zig build bench` → `zig-out/bin/slh-dsa-bench` (benchmark runner).
 - `zig build test` → runs unit tests in-tree.
+- `zig build ctgrind` → `zig-out/bin/slh-dsa-ctgrind{,-sign,-negctl}` (constant-time
+  harnesses; meaningful only when run under Valgrind — see `.github/workflows/ctgrind.yml`).
 
 No shared library. No DLL. No FFI surface. Use it from Zig.
 
