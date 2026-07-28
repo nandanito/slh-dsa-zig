@@ -222,7 +222,7 @@ algorithmic comparison, and it inverts:
 
 So Zig's *portable* SHA-256 is roughly half the speed of PQClean's portable
 C SHA-256, and on hardware without SHA-2 acceleration the SHA-2 parameter
-sets would sit exactly on the gate boundary — eight of these eighteen
+sets would sit exactly on the gate boundary — nine of these eighteen
 measurements are over 2.00×. **The gate passes as measured, on the machine
 and target it was measured on; it is not a claim that it passes everywhere.**
 This is a `std.crypto` property rather than something this library controls,

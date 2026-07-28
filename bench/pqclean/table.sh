@@ -12,25 +12,37 @@
 #
 # This doubles as the gate check rather than being only a formatter:
 #
-#   0  a complete result set, every measurement within the gate
-#   1  at least one measurement exceeded the gate
+#   0  a complete result set, every *gated* measurement within the gate
+#   1  at least one gated measurement exceeded the gate
 #   2  the input could not be gated -- no comparable pairs at all, a
 #      (param_set, op) with one side's row but not the other, or fewer
 #      measurements than EXPECT
+#
+# "Gated" excludes the portable table by default -- see GATE_PORTABLE below.
+# A portable-only input therefore exits 0 having rendered a diagnostic table,
+# and its over-gate count is printed rather than folded into the verdict.
 #
 # Exit 2 exists because a silently short table is the dangerous failure: an
 # interrupted run would otherwise print three green rows and exit 0.
 #
 # Environment:
-#   GATE    ratio ceiling (default 2.0)
-#   EXPECT  required measurement count (default 36 = 12 sets x 3 ops); set
-#           explicitly to gate a deliberate subset
+#   GATE           ratio ceiling (default 2.0)
+#   EXPECT         required measurement count (default 36 = 12 sets x 3 ops);
+#                  set explicitly to gate a deliberate subset
+#   GATE_PORTABLE  1 to also gate the portable (crypto-extensions-off) table,
+#                  which is diagnostic and ungated by default
 #
 # Lane: Lane A (bench infrastructure).
 
 set -euo pipefail
 
 GATE="${GATE:-2.0}"
+# The portable table (ARMv8 crypto extensions off) is diagnostic, not gated:
+# it exists to show what the SHA-2 sets do *without* hardware acceleration,
+# and those ratios exceeding the gate is the documented finding rather than a
+# regression. Its over-gate count is always reported. Set GATE_PORTABLE=1 to
+# fold it into the pass/fail verdict as well.
+GATE_PORTABLE="${GATE_PORTABLE:-0}"
 # 12 parameter sets x {keygen, sign, verify}. A run that stopped early is the
 # failure this guards: it yields complete *pairs*, just not all of them, so
 # pair-level validation alone would pass it. Set EXPECT explicitly when
@@ -38,7 +50,7 @@ GATE="${GATE:-2.0}"
 # for the six SHA-2 sets in a portable-only pass).
 EXPECT="${EXPECT:-36}"
 
-awk -F, -v gate="$GATE" -v expect="$EXPECT" '
+awk -F, -v gate="$GATE" -v expect="$EXPECT" -v gate_portable="$GATE_PORTABLE" '
 function fmt(ns) {
     if (ns < 1000)      return sprintf("%d ns", ns)
     else if (ns < 1e6)  return sprintf("%.2f us", ns / 1000)
@@ -100,8 +112,15 @@ END {
     }
 
     # Supplementary table: only emitted when a portable-build pass is present.
+    # port_rows counts *comparable* pairs (both sides present), matching what
+    # the table below actually prints and what EXPECT is checked against.
     have_port = 0; port_rows = 0
-    for (i = 1; i <= n; i++) if (order[i] in port) { have_port = 1; port_rows++ }
+    for (i = 1; i <= n; i++) {
+        key = order[i]
+        if (!(key in port)) continue
+        have_port = 1
+        if ((key in ref) && ref[key] != 0) port_rows++
+    }
     if (have_port) {
         print ""
         print "Portable build (ARMv8 crypto extensions disabled), isolating the"
@@ -109,13 +128,27 @@ END {
         print ""
         print "| param set | op | zig (portable) | PQClean `clean` | ratio |"
         print "|---|---|---:|---:|---:|"
+        port_over = 0
         for (i = 1; i <= n; i++) {
             key = order[i]
             split(key, parts, SUBSEP)
             if (!(key in port) || !(key in ref) || ref[key] == 0) continue
+            pr = port[key] / ref[key]
+            if (pr > gate + 1e-9) {
+                port_over++
+                if (gate_portable != "0") fails++
+            }
             printf "| %s | %s | %s | %s | %.2fx |\n", \
-                parts[1], parts[2], fmt(port[key]), fmt(ref[key]), port[key] / ref[key]
+                parts[1], parts[2], fmt(port[key]), fmt(ref[key]), pr
         }
+
+        # Always state the over-gate count rather than leaving it to be
+        # counted by hand off the table -- bench/README.md quotes this number.
+        printf "\n%d of %d portable measurement(s) exceed %.2fx.\n", \
+            port_over, port_rows, gate
+        if (gate_portable == "0")
+            print "The portable table is diagnostic and is NOT gated" \
+                  " (set GATE_PORTABLE=1 to gate it)."
     }
 
     if (rows > 0)
