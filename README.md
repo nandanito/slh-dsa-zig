@@ -56,7 +56,7 @@ post-quantum cryptography effort in Zig, and the direct successor to
 | SLH-DSA key generation | FIPS 205 §9.1, §10.1 | ✅ ACVP keyGen KATs pass (120/120, all 12 sets) |
 | SLH-DSA sign / verify | FIPS 205 §9.2–9.3, §10 | ✅ ACVP sigGen/sigVer KATs pass (all 12 sets, internal + external) · pre-hash deferred |
 | NIST ACVP KAT runner | — | ✅ keyGen · sigGen · sigVer modes (pre-hash groups skipped) |
-| Benchmarks vs PQClean | — | 🚧 Harness wired (real keygen/sign/verify); pinned `clean` gate + published numbers pending (#10) |
+| Benchmarks vs PQClean | — | ✅ Published against pinned PQClean `clean` — all 36 measurements inside the 2× gate, worst 1.15× (#10) · SHA-2 sets lean on ARMv8 hardware; x86-64 re-measure open (#40) |
 | Constant-time verification | ctgrind / valgrind | 🚧 WOTS+/FORS secret-processing primitives verified constant-time under Valgrind, both hash families (#34); full-sign audit deferred |
 | Fuzz harnesses | std.testing.fuzz | 🚧 Harnesses wired (verify, ACVP parser); cumulative nightly fuzzing accruing toward the 24h gate (#9) |
 
@@ -203,8 +203,11 @@ aspirational; they are gates each component must pass before being declared func
    corpus, and accrues ≥24h total before the component moves out of skeleton
    status.
 6. **Benchmarked** — performance within 2× of PQClean's portable `clean` C reference on
-   equivalent hardware. The AVX2 build is reported for honesty but not gated. See
-   [bench/README.md](bench/README.md).
+   equivalent hardware. The AVX2 build is reported for honesty but not gated.
+   Measured: all 36 keygen/sign/verify measurements pass, worst ratio 1.15×.
+   Note that the SHA-2 sets clear the gate partly on ARMv8 hardware SHA-256
+   rather than on the code — see [bench/README.md](bench/README.md) for the
+   numbers and that caveat in full.
 
 See [SECURITY.md](SECURITY.md) for the responsible-disclosure policy and current limitations.
 
@@ -240,8 +243,9 @@ arrives as early as possible (see issue #7):
 - [ ] Constant-time audit pass (ctgrind / valgrind) — component-level pass merged
       (secret-processing primitives, both hash families); whole-signing audit
       needs in-library declassify hooks (issue #34)
-- [ ] Benchmark suite + pinned PQClean comparison (issue #10) — harness merged and
-      the 2× gate pinned to PQClean `clean`; published numbers pending
+- [x] Benchmark suite + pinned PQClean comparison (issue #10) — gate pinned to
+      PQClean `clean` and measured: 36/36 inside 2×, worst 1.15×. Re-measure on
+      x86-64 with AVX2 reported alongside is open as issue #40
 - [ ] Upstream temperature check before Lane B starts (issue #11)
 - [ ] First tagged release (`v0.1.0` — experimental)
 - [ ] Upstream PR draft to `std.crypto.sign.slh_dsa`

@@ -48,7 +48,7 @@ the compiler.
 | **Zeroize secrets** | Every secret buffer scrubbed before scope exit, with volatile semantics so the compiler cannot elide it |
 | **KAT-validated** | No scheme operation is "functional" until NIST ACVP vectors pass |
 | **Fuzzed** | Every parser and attacker-facing API gets a `std.testing.fuzz` harness |
-| **Benchmarked** | Within 2× of PQClean's portable `clean` C reference |
+| **Benchmarked** | Within 2× of PQClean's portable `clean` C reference — [measured](testing.md#the-measured-result), 36/36 pass, worst 1.15× |
 | **Empirically CT-verified** | ctgrind/Valgrind, not just claimed in a comment |
 
 ## Deliberate non-goals
@@ -61,11 +61,18 @@ and get a scheme. It is a comptime argument, and a binary contains only the sets
 it uses. If you need runtime agility, build a dispatch layer over the
 specialisations you want — that is your policy decision, not the library's.
 
-**No SIMD.** No hand-vectorised Keccak or SHA-NI paths. This is why the
-performance gate is pinned to PQClean's *portable* `clean` variant rather than its
-AVX2 one: matching hand-written vector assembly with portable Zig is not a
+**No SIMD.** No hand-vectorised Keccak or SHA-NI paths *of our own*. This is why
+the performance gate is pinned to PQClean's *portable* `clean` variant rather than
+its AVX2 one: matching hand-written vector assembly with portable Zig is not a
 realistic target, and pretending otherwise would make the gate theatre. AVX2
 numbers are reported for honesty and never gated.
+
+This is a statement about code in `src/`, not about what runs. `std.crypto` may
+still dispatch to CPU instructions underneath — its SHA-256 takes an ARMv8
+crypto-extension path on Apple silicon, and that, rather than anything in this
+library, is what puts the SHA-2 parameter sets at 0.25×–0.56× of PQClean in the
+[measured comparison](testing.md#the-measured-result). Worth knowing before
+reading those numbers as a verdict on the code.
 
 **No production claim.** Unaudited. The `🚧 EXPERIMENTAL` banner stays until a
 third-party audit, regardless of how many gates are green.

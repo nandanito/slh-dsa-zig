@@ -158,6 +158,7 @@ Valgrind catches up.
 zig build bench
 zig build bench -- --param-set SLH-DSA-SHAKE-128s --op sign
 zig build bench -Dbench-optimize=ReleaseSafe
+zig build bench -- --csv                     # machine-readable, on stdout
 ```
 
 The gate is **within 2× of PQClean's portable `clean` C reference**, deliberately
@@ -165,7 +166,40 @@ not its AVX2 variant: a pure-Zig core without its own vectorised Keccak cannot
 match hand-written vector assembly, and gating on that would make the target
 theatre. AVX2 numbers are reported for honesty and never gated.
 
-Two measurement details worth copying:
+### The measured result
+
+The comparison is scripted in `bench/pqclean/` and the numbers are published in
+[`bench/README.md`](https://github.com/nandanito/slh-dsa-zig/blob/main/bench/README.md):
+
+```sh
+./bench/pqclean/compare.sh > results.csv
+./bench/pqclean/table.sh < results.csv       # exits non-zero if the gate fails
+```
+
+All 36 measurements pass, worst ratio 1.15×. But the two hash families pass for
+different reasons, and that distinction is the interesting part:
+
+| family | ratio range | why |
+|---|---|---|
+| SHAKE | 0.89×–1.15× | Genuine parity — portable Keccak on both sides |
+| SHA-2 | 0.25×–0.56× | Zig takes an ARMv8 hardware SHA-256 path; PQClean `clean` is portable C |
+
+Rebuild with the extensions off (`-Dcpu=apple_m3-sha2`) and the SHA-2 result
+inverts to 1.82×–2.14× — Zig's *portable* SHA-256 is about half the speed of
+PQClean's portable C. The gate passes as measured, on the target it was measured
+on; it is not a claim that it passes everywhere. Re-measuring on x86-64 is
+[issue #40](https://github.com/nandanito/slh-dsa-zig/issues/40).
+
+The lesson generalises: a performance gate that does not name the target's
+feature set is only half-specified, and the half that is missing is the half
+that decides the answer.
+
+### Three measurement details worth copying
+
+**Interleave the implementations being compared.** `compare.sh` runs zig, then
+PQClean, then moves to the next parameter set. Running one to completion and then
+the other measures the second on a machine the first had already heated — on a
+laptop that is larger than several of the ratios being reported.
 
 **Iteration budgets are speed-class aware.** `s` sets sign 20–100× slower than `f`
 sets, so a uniform iteration count either takes forever or produces noise. `s` sets
