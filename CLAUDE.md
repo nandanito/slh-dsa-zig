@@ -221,6 +221,12 @@ tests/            ← Lane A test infrastructure (KAT runner + main).
   vectors/        ← NIST ACVP vector files (gitignored except README.md).
 
 bench/            ← Lane A benchmarks.
+  bench.zig       ← the harness itself (`zig build bench`).
+  pqclean/        ← PQClean `clean` comparison for the 2× gate: C harness +
+                    shell drivers, deliberately OUTSIDE the Zig build graph.
+                    `zig build` never invokes them and the repo still needs no
+                    C toolchain — they exist only to reproduce a published
+                    number. This is not an exception to "no dependencies".
 examples/         ← Lane A runnable examples demonstrating the API.
 
 docs/             ← Lane A mkdocs learning site (concepts, components, glossary).
@@ -238,6 +244,8 @@ When adding a new source file:
 - Test infrastructure → `tests/<name>.zig`.
 - Examples → `examples/<name>.zig` and wire into `build.zig` via `addExample(...)`.
 - Benchmarks → extend `bench/bench.zig`, don't add new top-level bench files.
+  Reference-comparison tooling belongs in `bench/pqclean/` and must stay out
+  of `build.zig`.
 - Docs pages → `docs/<section>/<name>.md` and add to `nav:` in `mkdocs.yml`.
   Verify with `mkdocs build --strict` (CI runs it; anchor validation is on, so a
   stale `#anchor` fails the build).

@@ -129,9 +129,10 @@ signature size.
   is 2.2× smaller. But each tree has 512 leaves rather than 8, so signing is much
   more expensive.
 
-Measured on this project's benchmarks, SHAKE-128s signing runs around 426 ms
-against 128f's 20 ms — a factor of ~21, in exchange for 2.2× less signature. The
-two variants are not "one is better"; they are two positions on a genuine curve.
+Measured on this project's benchmarks (Apple M3 Pro, `ReleaseFast`), SHAKE-128s
+signing runs around 368 ms against 128f's 19 ms — a factor of ~20, in exchange
+for 2.2× less signature. The two variants are not "one is better"; they are two
+positions on a genuine curve.
 
 !!! tip "How to choose"
 

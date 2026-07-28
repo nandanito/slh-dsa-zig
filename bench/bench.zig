@@ -15,8 +15,11 @@
 //!     `-Dbench-optimize=...`. Debug-mode numbers are meaningless.
 //!   - The same key + message is reused inside a measurement loop so the
 //!     numbers reflect steady-state cost, not first-touch effects.
-//!   - We report the median of N runs after dropping the slowest 10% as
-//!     warmup. The mean is also printed but the median is the headline.
+//!   - We report the median of the N per-iteration samples; the mean, min
+//!     and max are also computed, but the median is the headline because it
+//!     is the statistic least disturbed by scheduler jitter and page faults.
+//!     No samples are discarded — the median already discounts the warmup
+//!     iteration rather than us picking a trim fraction by hand.
 //!
 //! Comparison baseline: the 2× performance gate (CLAUDE.md discipline
 //! table, README "Cryptographic discipline" item 6) is pinned to
@@ -78,37 +81,72 @@ const Cli = struct {
     op: Op = .all,
     param_set_filter: ?slh_dsa.ParamSet = null,
     iters_override: ?u32 = null,
+    csv: bool = false,
 };
 
 const usage =
     \\Usage: slh-dsa-bench [--op all|keygen|sign|verify]
     \\                     [--param-set SLH-DSA-...]
     \\                     [--iters N]
+    \\                     [--csv]
+    \\
+    \\--csv emits machine-readable rows for joining against an external
+    \\reference run (see bench/pqclean/run.sh, which emits the same schema).
     \\
 ;
 
+/// Canonical FIPS 205 §11 parameter-set names, paired with their enum tags.
+///
+/// Used both to parse `--param-set` and to label `--csv` rows. The CSV must
+/// print this spelling rather than `@tagName` so its rows join directly
+/// against the PQClean reference harness, which emits the same names.
+///
+/// Keep in sync with tests/kat_runner.zig::parseParamSet — they're
+/// intentionally not shared so bench has no dependency on the test
+/// infrastructure.
+const param_set_names = [_]struct { []const u8, slh_dsa.ParamSet }{
+    .{ "SLH-DSA-SHA2-128s", .slh_dsa_sha2_128s },
+    .{ "SLH-DSA-SHA2-128f", .slh_dsa_sha2_128f },
+    .{ "SLH-DSA-SHA2-192s", .slh_dsa_sha2_192s },
+    .{ "SLH-DSA-SHA2-192f", .slh_dsa_sha2_192f },
+    .{ "SLH-DSA-SHA2-256s", .slh_dsa_sha2_256s },
+    .{ "SLH-DSA-SHA2-256f", .slh_dsa_sha2_256f },
+    .{ "SLH-DSA-SHAKE-128s", .slh_dsa_shake_128s },
+    .{ "SLH-DSA-SHAKE-128f", .slh_dsa_shake_128f },
+    .{ "SLH-DSA-SHAKE-192s", .slh_dsa_shake_192s },
+    .{ "SLH-DSA-SHAKE-192f", .slh_dsa_shake_192f },
+    .{ "SLH-DSA-SHAKE-256s", .slh_dsa_shake_256s },
+    .{ "SLH-DSA-SHAKE-256f", .slh_dsa_shake_256f },
+};
+
 fn parseParamSetName(name: []const u8) ?slh_dsa.ParamSet {
-    // Keep this in sync with tests/kat_runner.zig::parseParamSet —
-    // they're intentionally not shared so bench has no dependency on
-    // the test infrastructure.
-    const map = .{
-        .{ "SLH-DSA-SHA2-128s", slh_dsa.ParamSet.slh_dsa_sha2_128s },
-        .{ "SLH-DSA-SHA2-128f", slh_dsa.ParamSet.slh_dsa_sha2_128f },
-        .{ "SLH-DSA-SHA2-192s", slh_dsa.ParamSet.slh_dsa_sha2_192s },
-        .{ "SLH-DSA-SHA2-192f", slh_dsa.ParamSet.slh_dsa_sha2_192f },
-        .{ "SLH-DSA-SHA2-256s", slh_dsa.ParamSet.slh_dsa_sha2_256s },
-        .{ "SLH-DSA-SHA2-256f", slh_dsa.ParamSet.slh_dsa_sha2_256f },
-        .{ "SLH-DSA-SHAKE-128s", slh_dsa.ParamSet.slh_dsa_shake_128s },
-        .{ "SLH-DSA-SHAKE-128f", slh_dsa.ParamSet.slh_dsa_shake_128f },
-        .{ "SLH-DSA-SHAKE-192s", slh_dsa.ParamSet.slh_dsa_shake_192s },
-        .{ "SLH-DSA-SHAKE-192f", slh_dsa.ParamSet.slh_dsa_shake_192f },
-        .{ "SLH-DSA-SHAKE-256s", slh_dsa.ParamSet.slh_dsa_shake_256s },
-        .{ "SLH-DSA-SHAKE-256f", slh_dsa.ParamSet.slh_dsa_shake_256f },
-    };
-    inline for (map) |entry| {
+    for (param_set_names) |entry| {
         if (std.mem.eql(u8, name, entry[0])) return entry[1];
     }
     return null;
+}
+
+fn canonicalName(ps: slh_dsa.ParamSet) []const u8 {
+    for (param_set_names) |entry| {
+        if (entry[1] == ps) return entry[0];
+    }
+    unreachable; // Exhaustiveness is asserted below.
+}
+
+comptime {
+    // Makes `canonicalName`'s `unreachable` sound, and catches a parameter set
+    // added to src/params.zig without a name here (which would otherwise only
+    // surface as a panic mid-benchmark).
+    if (param_set_names.len != std.enums.values(slh_dsa.ParamSet).len) {
+        @compileError("param_set_names does not cover every ParamSet tag");
+    }
+    for (std.enums.values(slh_dsa.ParamSet)) |ps| {
+        var found = false;
+        for (param_set_names) |entry| {
+            if (entry[1] == ps) found = true;
+        }
+        if (!found) @compileError("missing canonical name for " ++ @tagName(ps));
+    }
 }
 
 fn parseCli(args: []const [:0]const u8) !Cli {
@@ -137,6 +175,8 @@ fn parseCli(args: []const [:0]const u8) !Cli {
             i += 1;
             if (i >= args.len) return error.MissingArgument;
             cli.iters_override = try std.fmt.parseInt(u32, args[i], 10);
+        } else if (std.mem.eql(u8, arg, "--csv")) {
+            cli.csv = true;
         } else {
             std.debug.print("error: unexpected argument '{s}'\n", .{arg});
             return error.InvalidArgument;
@@ -175,7 +215,25 @@ fn computeStats(samples: []u64, op: []const u8, ps: slh_dsa.ParamSet, iters: u32
     };
 }
 
-fn printSample(s: Sample) void {
+/// Emits one measurement. `csv_out` non-null selects the machine-readable
+/// form, which goes to stdout (it is data); the human table stays on stderr
+/// via `std.debug.print`, so `--csv` output can be piped without the
+/// progress chatter mixing in.
+fn printSample(s: Sample, csv_out: ?*std.Io.Writer) !void {
+    if (csv_out) |out| {
+        // Schema shared with bench/pqclean/run.sh so the two runs join on
+        // (param_set, op). Keep the column order identical in both.
+        try out.print("slh-dsa-zig,{s},{s},{d},{d},{d},{d},{d}\n", .{
+            canonicalName(s.param_set),
+            s.op,
+            s.iters,
+            s.median_ns,
+            s.mean_ns,
+            s.min_ns,
+            s.max_ns,
+        });
+        return;
+    }
     const ops_per_sec: f64 = if (s.median_ns == 0)
         0.0
     else
@@ -206,6 +264,7 @@ fn benchOne(
     comptime param_set: slh_dsa.ParamSet,
     op: Op,
     iters_override: ?u32,
+    csv_out: ?*std.Io.Writer,
 ) !void {
     const Scheme = slh_dsa.Slh_Dsa(param_set);
     const n = Scheme.params.n;
@@ -231,7 +290,7 @@ fn benchOne(
             std.mem.doNotOptimizeAway(&kp);
             ns[i] = @intCast(end - start);
         }
-        printSample(computeStats(ns, "keygen", param_set, iters));
+        try printSample(computeStats(ns, "keygen", param_set, iters), csv_out);
     }
 
     // Sign and verify share a deterministic keypair. `fromSeeds` needs no
@@ -269,7 +328,7 @@ fn benchOne(
                 std.mem.doNotOptimizeAway(&sig);
                 ns[i] = @intCast(end - start);
             }
-            printSample(computeStats(ns, "sign", param_set, iters));
+            try printSample(computeStats(ns, "sign", param_set, iters), csv_out);
         }
 
         if (op == .all or op == .verify) {
@@ -296,7 +355,7 @@ fn benchOne(
                 const end = std.Io.Clock.awake.now(io).nanoseconds;
                 ns[i] = @intCast(end - start);
             }
-            printSample(computeStats(ns, "verify", param_set, iters));
+            try printSample(computeStats(ns, "verify", param_set, iters), csv_out);
         }
     }
 }
@@ -310,6 +369,23 @@ pub fn main(init: std.process.Init) !u8 {
     const args = try init.minimal.args.toSlice(allocator);
 
     const cli = parseCli(args) catch return 1;
+
+    if (cli.csv) {
+        // CSV is data, so it goes to stdout and can be piped straight into
+        // bench/pqclean/table.sh. Column order must match
+        // bench/pqclean/run.sh exactly.
+        var stdout_buf: [4096]u8 = undefined;
+        var stdout_writer = std.Io.File.stdout().writer(init.io, &stdout_buf);
+        const out = &stdout_writer.interface;
+
+        try out.print("impl,param_set,op,iters,median_ns,mean_ns,min_ns,max_ns\n", .{});
+        inline for (comptime std.enums.values(slh_dsa.ParamSet)) |ps| {
+            const matches = cli.param_set_filter == null or cli.param_set_filter.? == ps;
+            if (matches) try benchOne(init.io, allocator, ps, cli.op, cli.iters_override, out);
+        }
+        try stdout_writer.flush();
+        return 0;
+    }
 
     std.debug.print("slh-dsa-bench (optimize={s})\n", .{@tagName(builtin.mode)});
     std.debug.print("note: the 2x gate is measured against PQClean's `clean` " ++
@@ -335,7 +411,7 @@ pub fn main(init: std.process.Init) !u8 {
     // specialisation gets fully monomorphised.
     inline for (comptime std.enums.values(slh_dsa.ParamSet)) |ps| {
         const matches = cli.param_set_filter == null or cli.param_set_filter.? == ps;
-        if (matches) try benchOne(init.io, allocator, ps, cli.op, cli.iters_override);
+        if (matches) try benchOne(init.io, allocator, ps, cli.op, cli.iters_override, null);
     }
 
     return 0;
