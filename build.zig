@@ -134,13 +134,15 @@ pub fn build(b: *std.Build) void {
     fuzz_step.dependOn(&run_fuzz_tests.step);
 
     // ---------------------------------------------------------------------
-    // Constant-time (ctgrind) harness — taints SK.seed and signs so Valgrind's
+    // Constant-time (ctgrind) harnesses — taint the secret key so Valgrind's
     // memcheck can flag any secret-dependent branch or memory access. Uses
     // std.valgrind client requests (pure Zig, no C shim). See issue #34 and
-    // .github/workflows/ctgrind.yml, which runs the built binary under Valgrind.
+    // .github/workflows/ctgrind.yml, which runs the built binaries under
+    // Valgrind.
     //
     //   zig build ctgrind            — build + run directly (no-op taint; sanity)
-    //   valgrind zig-out/bin/slh-dsa-ctgrind   — the real constant-time check
+    //   valgrind zig-out/bin/slh-dsa-ctgrind        — components, the real check
+    //   valgrind zig-out/bin/slh-dsa-ctgrind-sign   — whole keygen + sign
     // ---------------------------------------------------------------------
 
     // Force Zig to emit the std.valgrind client requests even in release
@@ -153,6 +155,18 @@ pub fn build(b: *std.Build) void {
     // the on-target build is non-vacuous.
     const valgrind_ok = target.result.cpu.arch == .x86_64;
 
+    // Setting `.valgrind` on a harness module is enough to reach the library
+    // too: Zig 0.16 resolves Valgrind support per *compilation*, so the root
+    // module's `-fvalgrind` also governs `builtin.valgrind_support` in imported
+    // modules — verified by disassembly, and the reason the whole-sign
+    // harness's in-library declassify hooks (src/ct.zig) actually emit while it
+    // imports the ordinary `slh_dsa_mod`. taint_sign.zig asserts the two agree
+    // at comptime, so a future Zig that makes this per-module fails the build
+    // with a readable message rather than an avalanche of false positives.
+
+    const ctgrind_step = b.step("ctgrind", "Build & run the constant-time (ctgrind) harnesses");
+
+    // Component-level: primitives in isolation, no declassification needed.
     const ctgrind_mod = b.createModule(.{
         .root_source_file = b.path("tests/ctgrind/taint_components.zig"),
         .target = target,
@@ -167,6 +181,24 @@ pub fn build(b: *std.Build) void {
     });
     // Installed so the workflow can invoke it under Valgrind at a stable path.
     b.installArtifact(ctgrind_exe);
+    ctgrind_step.dependOn(&b.addRunArtifact(ctgrind_exe).step);
+
+    // Whole-path: a complete keygen + sign, resting on the in-library
+    // declassify hooks for the public SK.seed-derived intermediates.
+    const ctgrind_sign_mod = b.createModule(.{
+        .root_source_file = b.path("tests/ctgrind/taint_sign.zig"),
+        .target = target,
+        .optimize = optimize,
+        .valgrind = valgrind_ok,
+    });
+    ctgrind_sign_mod.addImport("slh_dsa", slh_dsa_mod);
+
+    const ctgrind_sign_exe = b.addExecutable(.{
+        .name = "slh-dsa-ctgrind-sign",
+        .root_module = ctgrind_sign_mod,
+    });
+    b.installArtifact(ctgrind_sign_exe);
+    ctgrind_step.dependOn(&b.addRunArtifact(ctgrind_sign_exe).step);
 
     // Negative control: deliberately branches on tainted data, so Valgrind MUST
     // flag it. The workflow runs it expecting failure — this proves the taint
@@ -183,12 +215,8 @@ pub fn build(b: *std.Build) void {
         .root_module = ctgrind_negctl_mod,
     });
     b.installArtifact(ctgrind_negctl_exe);
-
-    const run_ctgrind = b.addRunArtifact(ctgrind_exe);
-    const ctgrind_step = b.step("ctgrind", "Build & run the constant-time (ctgrind) harness");
-    ctgrind_step.dependOn(&run_ctgrind.step);
-    // Ensure `zig build ctgrind` also builds the negative control for the CI
-    // Valgrind pass (running it directly, without Valgrind, would prove nothing).
+    // Built, not run: running it outside Valgrind would prove nothing, and it
+    // is *supposed* to fail under Valgrind.
     ctgrind_step.dependOn(&ctgrind_negctl_exe.step);
 
     // ---------------------------------------------------------------------

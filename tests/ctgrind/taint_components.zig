@@ -70,7 +70,12 @@ fn auditComponents(comptime param_set: slh_dsa.ParamSet, io: std.Io) !void {
 
 pub fn main(init: std.process.Init) !void {
     // One target per hash family so both dispatchers (§11.1 SHAKE, §11.2
-    // SHA-2) are audited.
+    // SHA-2) are audited, and both SHA-2 widths: §11.2 widens H and T_l to
+    // SHA-512 for categories 3/5 (n = 24, 32), which `fors_node` and
+    // `wots_pkGen` respectively reach. n = 32 takes the same branch as n = 24.
+    // See taint_sign.zig for the full parameter-set coverage argument.
     try auditComponents(.slh_dsa_shake_128f, init.io);
     try auditComponents(.slh_dsa_sha2_128f, init.io);
+    try auditComponents(.slh_dsa_shake_192f, init.io);
+    try auditComponents(.slh_dsa_sha2_192f, init.io);
 }

@@ -48,7 +48,7 @@ loop bound is a WOTS+ digit; FORS's loops are indexed by digest fields.
     great deal.
 
     This is also, precisely, why the whole-signing audit is hard — see
-    [below](#what-is-still-open).
+    [declassification](#declassification-teaching-the-tool-what-is-public).
 
 ## Verification, not assertion
 
@@ -80,14 +80,18 @@ Secrets come from the **OS RNG**, not constants, so the optimiser cannot fold th
 secret away and make the test vacuous.
 
 ```sh
-zig build ctgrind                        # build + run (taint inert without Valgrind)
-valgrind zig-out/bin/slh-dsa-ctgrind     # the real check
+zig build ctgrind                            # build + run (taint inert without Valgrind)
+valgrind zig-out/bin/slh-dsa-ctgrind         # components
+valgrind zig-out/bin/slh-dsa-ctgrind-sign    # whole keygen + sign
 ```
 
 ### What is covered
 
-`tests/ctgrind/taint_components.zig` taints `SK.seed` and drives the primitives
-that consume it, for **both hash families**:
+Two harnesses, each run over four parameter sets — see
+[which sets, and why those](#which-parameter-sets-are-audited) below.
+
+**`tests/ctgrind/taint_components.zig`** taints `SK.seed` and drives the primitives
+that consume it:
 
 - **`wots_pkGen`** — `PRF` per chain origin, full-length WOTS+ chaining, `T_len`
   compression.
@@ -97,7 +101,103 @@ These are the right components because their loop bounds are *fixed or public*:
 WOTS+ chains always run exactly `w-1` steps during `pkGen`, and FORS tree heights
 and indices are public geometry. There is no secret-derived loop bound, so a clean
 run means exactly one thing — **the primitives are constant-time in the secret
-value.** No interpretation required.
+value.** No interpretation required, and no declassification needed.
+
+**`tests/ctgrind/taint_sign.zig`** taints `SK.seed` *and* `SK.prf` and runs a
+complete key generation (§9.1) and signature (§9.2) — FORS signing, every XMSS
+layer, the hash-family dispatch, and the index arithmetic joining them. A clean
+run means no branch and no memory address anywhere in keygen or sign depends on
+the secret key's value.
+
+Both are kept. The component pass needs no declassification to be meaningful, so
+when something regresses it says *which primitive* broke; the whole-path pass
+covers what their composition adds.
+
+### Which parameter sets are audited
+
+Parameter sets are comptime-monomorphised, so "audited" is a claim about each
+set individually, not about the library in the abstract. The harnesses run four:
+`SHAKE-128f`, `SHA2-128f`, `SHAKE-192f`, `SHA2-192f`.
+
+That choice is not arbitrary — it is the smallest set covering every distinct
+code path:
+
+-   **Both families.** §11.1 SHAKE and §11.2 SHA-2 are separate adapters.
+-   **Both SHA-2 widths.** §11.2 widens `H`, `T_l` and `H_msg` to SHA-512, and
+    `PRF_msg` to HMAC-SHA-512, for categories 3/5 (`n = 24, 32`). A 128f-only
+    audit would never execute any of it — and `SK.prf` is that HMAC's *key*, so
+    the 192f sets are the only ones that audit secret-keyed SHA-512. `n = 32`
+    takes the same branch as `n = 24`, so it would add runtime and no new path.
+
+What the other eight sets vary is public tree geometry (`h`, `d`, `h'`, `a`, `k`)
+and output lengths: loop bounds over values the verifier recomputes, never a new
+branch on secret data. The `f` variants are chosen over `s` because they keep the
+run inside Valgrind's slowdown budget while exercising a *deeper* layer stack
+(`d = 22` against `d = 7`).
+
+!!! note "The honest reading"
+
+    This is a coverage argument, not a proof. It says the audited sets execute
+    every branch the unaudited ones would, which is checkable by reading the
+    adapters — not that the unaudited sets have been run.
+
+### Declassification: teaching the tool what is public
+
+The whole-path audit only works once Valgrind is told which SK-derived values are
+public — otherwise it reports thousands of secret-dependent branches at `chain`
+on code that is perfectly constant-time. The reasoning is the [warning
+above](#what-is-actually-secret) made concrete:
+
+1. `PK_FORS` and each XMSS root descend from `SK.seed`, so taint propagation marks
+   them undefined.
+2. Each is the *message* the next WOTS+ signs, and its base-`w` digits set that
+   layer's chain lengths.
+3. So a tainted value gates a loop bound, and memcheck dutifully reports it.
+
+The code is right and the tool is right; they disagree only about
+**classification**. `src/ct.zig` supplies the missing half:
+
+```zig
+pub const audit_enabled: bool = builtin.valgrind_support;
+
+pub inline fn declassify(bytes: []const u8) void {
+    if (!audit_enabled) return;
+    std.valgrind.memcheck.makeMemDefined(bytes);
+}
+```
+
+It is called at exactly three points, each one a place where FIPS 205 itself makes
+the value public:
+
+| Value | Site | Why it is public |
+|---|---|---|
+| `R` | `signCore`, after `PRF_msg` | Published verbatim as the first `n` signature bytes (§9.2) |
+| `PK_FORS` | `signCore`, after `fors_pkFromSig` | Exactly what the verifier recomputes (§9.3) |
+| Each XMSS root | `ht_sign`, after each `xmss_pkFromSig` | `ht_verify` reconstructs it from the signature (§7.2) |
+
+Three properties make this safe to have in production code:
+
+-   **Zero-cost by default.** `audit_enabled` is comptime-known and false in
+    ordinary builds, so the call vanishes — no branch, no code. When it *is*
+    enabled the emitted sequence is Valgrind's no-op client request, which changes
+    memcheck's shadow state only, never program values or timing on real hardware.
+-   **Minimal by construction.** Only these three. Declassifying, say, the whole
+    FORS signature would also silence the false positives — and would silently
+    blind the audit to a genuine leak through those bytes. Over-declassification
+    costs nothing at runtime and everything in coverage, which makes it the
+    failure mode to guard against.
+-   **Justified at the call site.** Each one cites the algorithm that publishes
+    the value, so the classification can be checked rather than trusted.
+
+!!! note "Why this failure mode is the safe one"
+
+    Inert *taint* markers would make the gate pass while checking nothing — the
+    vacuity trap, which the negative control exists to catch. Inert
+    *declassification* does the opposite: it makes the gate **fail**, loudly, at
+    `chain`. Only the first is dangerous. A comptime assertion in the harness
+    additionally pins that the library and the harness resolve Valgrind support
+    identically, which in Zig 0.16 they always do — it is set per compilation, not
+    per module.
 
 ### The non-vacuity problem
 
@@ -142,29 +242,26 @@ fi
 
 ## What is still open
 
-The **whole-signing** audit — tainting `SK.seed` and running a complete `sign` —
-currently reports false positives, and understanding why is genuinely instructive.
+The gate covers key generation and signing. Three limits are worth stating plainly:
 
-Inside `ht_sign`, the message handed to WOTS+ is a FORS public key or an XMSS root.
-Those values are **public** — they end up recoverable from the signature — but they
-are computed *from* `SK.seed`, so Valgrind's taint propagation marks them
-undefined. Their base-`w` digits then set WOTS+ chain lengths, which means a tainted
-value gates a loop bound, which memcheck dutifully reports.
+-   **Verify is not audited, by construction.** It takes no secret input — the
+    signature, the reconstructed root, and `PK.root` are all public — which is why
+    `ht_verify` ends in a plain `std.mem.eql` rather than a constant-time compare.
+    Auditing it would verify a property it does not need to have.
+-   **One microarchitecture level.** The workflow pins `x86-64-v3`, because the
+    packaged Valgrind cannot decode AVX-512 and SIGILLs on it. The AVX-512 code
+    paths are therefore unaudited. Tracked as
+    [issue #6](https://github.com/nandanito/slh-dsa-zig/issues/6).
+-   **x86_64 only.** `-fvalgrind` does not compile for aarch64, so there is no ARM
+    leg — and none on the maintainer's macOS/Apple-Silicon machine, which is why
+    CI is the only place this check runs at all.
 
-The code is correct. The tool is right that a tainted value reached a branch. The
-disagreement is over classification: the value is public, but nothing has told
-Valgrind so.
+And the standing caveat that no tool removes: memcheck proves the absence of
+secret-dependent *branches and memory addresses*. It says nothing about
+data-dependent instruction timing in the underlying hardware, or about physical
+side channels. See [SECURITY.md][security] for what is out of scope.
 
-Fixing it needs **in-library declassify hooks** — `makeMemDefined` calls at the
-points where a secret-derived value becomes public — which means either
-conditional instrumentation inside `src/` or a test-only seam. That is a real
-design decision affecting production code paths, so it is deliberately deferred and
-documented rather than rushed. Tracked as
-[issue #34](https://github.com/nandanito/slh-dsa-zig/issues/34).
-
-Until then the honest claim is narrow and precise: **the secret-processing
-primitives are verified constant-time; the composed signing path is not yet
-verified end-to-end.**
+[security]: https://github.com/nandanito/slh-dsa-zig/blob/main/SECURITY.md
 
 ## In-code conventions
 

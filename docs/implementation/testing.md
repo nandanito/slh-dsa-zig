@@ -144,8 +144,9 @@ a crash-free counter.
 ## Constant-time verification
 
 Covered in detail on [its own page](constant-time.md). In summary: Valgrind-based
-taint tracking of `SK.seed` through the secret-processing primitives, both hash
-families, with a negative control proving the gate is not vacuous.
+taint tracking of `SK.seed` and `SK.prf` through the secret-processing primitives
+*and* through a whole key generation + signature, both hash families, with a
+negative control proving the gate is not vacuous.
 
 The AVX-512 caveat: the workflow pins the target to `x86-64-v3` because the
 packaged Valgrind cannot decode AVX-512 and SIGILLs on it. Tracked as

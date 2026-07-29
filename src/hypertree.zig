@@ -17,6 +17,7 @@ const std = @import("std");
 const params_mod = @import("params.zig");
 const address = @import("address.zig");
 const xmss_mod = @import("xmss.zig");
+const ct = @import("ct.zig");
 
 pub fn Hypertree(comptime p: params_mod.Params) type {
     return struct {
@@ -66,6 +67,13 @@ pub fn Hypertree(comptime p: params_mod.Params) type {
 
             var root: [n]u8 = undefined;
             Xmss.pkFromSig(idx_leaf, bottom, msg, pk_seed, &adrs, &root);
+            // Every XMSS root threaded up the hypertree is public: ht_verify
+            // reconstructs this exact value from the published signature
+            // (§7.2 Algorithm 13). It is also the message the next layer's
+            // WOTS+ signs, and its base-w digits set that layer's chain
+            // lengths — so a CT audit that has not been told it is public
+            // reports a false secret-dependent branch. See ct.zig.
+            ct.declassify(&root);
 
             // Layers 1..d-1: each signs the root of the layer below. The leaf
             // within a layer is the low h' bits of idx_tree; the remaining
@@ -85,6 +93,7 @@ pub fn Hypertree(comptime p: params_mod.Params) type {
                 if (j < d - 1) {
                     var next_root: [n]u8 = undefined;
                     Xmss.pkFromSig(leaf, layer, &root, pk_seed, &adrs, &next_root);
+                    ct.declassify(&next_root); // public, as above
                     root = next_root;
                 }
             }

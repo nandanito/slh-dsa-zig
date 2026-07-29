@@ -29,6 +29,7 @@ pub const Slh_Dsa = slh_dsa_mod.Slh_Dsa;
 // not depend on these paths.
 
 pub const internal = struct {
+    pub const ct = @import("ct.zig");
     pub const params = @import("params.zig");
     pub const util = @import("util.zig");
     pub const address = @import("address.zig");

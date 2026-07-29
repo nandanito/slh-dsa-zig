@@ -29,6 +29,7 @@ const xmss_mod = @import("xmss.zig");
 const hypertree_mod = @import("hypertree.zig");
 const fors_mod = @import("fors.zig");
 const util = @import("util.zig");
+const ct = @import("ct.zig");
 
 pub const ParamSet = params_mod.ParamSet;
 
@@ -185,6 +186,12 @@ pub fn Slh_Dsa(comptime param_set: ParamSet) type {
             const randomizer = opt_rand orelse pk_seed;
             const r = out_sig[0..p.n];
             Hash.prf_msg(sk_prf, randomizer, msg_parts, r);
+            // R is keyed by the secret SK.prf but is published verbatim as the
+            // first n signature bytes (§9.2 Algorithm 19), so it is public from
+            // the moment it is written — and the digest below, which it seeds,
+            // is public with it. Declassify for CT audits; compiles away
+            // otherwise (see ct.zig).
+            ct.declassify(r);
 
             // digest = H_msg(R, PK.seed, PK.root, M'); parse the tree/leaf indices.
             var digest: [p.m]u8 = undefined;
@@ -207,6 +214,12 @@ pub fn Slh_Dsa(comptime param_set: ParamSet) type {
             adrs_pk.setType(.fors_tree);
             adrs_pk.setKeyPairAddress(idx_leaf);
             Fors.pkFromSig(fors_sig, md, pk_seed, &adrs_pk, &pk_fors);
+            // PK_FORS descends from SK.seed, but it is exactly what the
+            // verifier recomputes from the signature and the digest (§9.3
+            // Algorithm 20 — see `verifyCore` below), so it is public. The
+            // hypertree's WOTS+ digits are derived from it and gate `chain`'s
+            // loop bound, so a CT audit must classify it correctly.
+            ct.declassify(&pk_fors);
 
             // The hypertree signs the FORS public key.
             const ht_sig = out_sig[p.n + Fors.signature_bytes ..][0..Hypertree.signature_bytes];

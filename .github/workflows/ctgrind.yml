@@ -6,11 +6,13 @@ name: ctgrind
 # as a use-of-uninitialised-value error.
 #
 # The taint markers are Valgrind client requests issued via `std.valgrind`
-# (pure Zig inline asm — no C shim, no <valgrind/memcheck.h>). The harness
+# (pure Zig inline asm — no C shim, no <valgrind/memcheck.h>). Two harnesses:
 # `tests/ctgrind/taint_components.zig` taints SK.seed and runs the
-# secret-processing primitives (WOTS+ pkGen, FORS node); `negative_control.zig`
-# proves the taint is live. See issue #34 for the taint model and the deferred
-# whole-sign coverage.
+# secret-processing primitives (WOTS+ pkGen, FORS node), and
+# `tests/ctgrind/taint_sign.zig` taints SK.seed + SK.prf and runs a whole
+# keygen + sign. `negative_control.zig` proves the taint is live. See issue #34
+# for the taint model and src/ct.zig for the declassification hooks the
+# whole-sign audit needs.
 #
 # Why a separate workflow: constant-time issues are subtle and best surfaced
 # as a dedicated check, and Valgrind's slowdown keeps it out of the hot loop.
@@ -61,14 +63,19 @@ jobs:
             -Dcpu=x86_64_v3 \
             --summary all
 
-      # Two Valgrind passes. `--error-exitcode=1` turns any report (a
+      # Three Valgrind passes. `--error-exitcode=1` turns any report (a
       # conditional jump or memory access depending on tainted data) into a
-      # non-zero exit. Neither harness heap-allocates, so leak checking is off.
+      # non-zero exit. No harness heap-allocates, so leak checking is off.
       #
       #   1. Negative control — MUST be flagged. It taints a byte and branches
       #      on it; a clean run means the std.valgrind client requests are inert
       #      (the vacuous-gate failure mode), so we fail the job.
-      #   2. Real check — the audited `sign` MUST be clean.
+      #   2. Components — the secret-processing primitives MUST be clean.
+      #   3. Whole path — keygen + sign MUST be clean.
+      #
+      # 2 and 3 are both kept: the component pass needs no declassification to
+      # be meaningful, so it localises a regression to a single primitive, while
+      # the whole-path pass covers their composition.
       - name: Run Valgrind constant-time check
         run: |
           set -euo pipefail
@@ -76,12 +83,15 @@ jobs:
             find .zig-cache -name "$1" -type f -perm -u+x \
               -printf '%T@ %p\n' | sort -nr | head -1 | awk '{print $2}'
           }
-          real=$(find_bin 'slh-dsa-ctgrind')
+          components=$(find_bin 'slh-dsa-ctgrind')
+          whole=$(find_bin 'slh-dsa-ctgrind-sign')
           negctl=$(find_bin 'slh-dsa-ctgrind-negctl')
-          if [ -z "$real" ] || [ -z "$negctl" ]; then
-            echo "::error::ctgrind binaries not found (real='$real' negctl='$negctl')"
-            exit 1
-          fi
+          for pair in "components:$components" "whole:$whole" "negctl:$negctl"; do
+            if [ -z "${pair#*:}" ]; then
+              echo "::error::ctgrind binary not found: ${pair%%:*}"
+              exit 1
+            fi
+          done
 
           echo "== negative control ($negctl): expecting Valgrind to report a leak =="
           if valgrind --error-exitcode=1 --leak-check=no --track-origins=yes "$negctl"; then
@@ -90,19 +100,32 @@ jobs:
           fi
           echo "negative control correctly flagged; taint tracking is live"
 
-          echo "== constant-time check ($real): expecting a clean run =="
+          echo "== components ($components): expecting a clean run =="
           valgrind \
             --error-exitcode=1 \
             --leak-check=no \
             --track-origins=yes \
-            "$real"
+            "$components"
+
+          echo "== whole keygen + sign ($whole): expecting a clean run =="
+          valgrind \
+            --error-exitcode=1 \
+            --leak-check=no \
+            --track-origins=yes \
+            "$whole"
 
       - name: Coverage note
         if: always()
         run: |
-          echo "::notice::Verifies SK.seed is not used in any secret-dependent"
-          echo "::notice::branch or memory access in the secret-processing"
-          echo "::notice::primitives (WOTS+ pkGen: PRF + chaining + T_len; FORS"
-          echo "::notice::node: PRF + F + H), for the SHAKE and SHA-2 128f sets."
-          echo "::notice::Deferred (needs in-library declassify hooks for the"
-          echo "::notice::public WOTS+ messages, tracked on #34): the full sign."
+          echo "::notice::Verifies that no branch and no memory address in key"
+          echo "::notice::generation (FIPS 205 §9.1) or signing (§9.2) depends on"
+          echo "::notice::the value of SK.seed or SK.prf, plus the secret-processing"
+          echo "::notice::primitives in isolation (WOTS+ pkGen, FORS node)."
+          echo "::notice::Parameter sets: SHAKE/SHA2 128f and 192f — every distinct"
+          echo "::notice::adapter path, including the §11.2 SHA-512 widening at"
+          echo "::notice::n>16 (SK.prf keys HMAC-SHA-512 there). The other eight"
+          echo "::notice::sets differ only in public tree geometry."
+          echo "::notice::Public SK.seed-derived intermediates (R, PK_FORS, each"
+          echo "::notice::XMSS root) are declassified in-library via src/ct.zig."
+          echo "::notice::Not covered: verify (no secret inputs by construction),"
+          echo "::notice::and the AVX-512 code paths Valgrind cannot decode (#6)."

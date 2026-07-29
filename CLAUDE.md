@@ -154,6 +154,8 @@ zig build bench                             # benchmarks (ReleaseFast default)
 zig build bench -- --param-set SLH-DSA-SHAKE-128s --op sign
 zig build examples                          # build all examples
 zig build example_basic_sign                # build + run a single example
+zig build ctgrind                           # build the constant-time harnesses
+                                            # (the real check needs Valgrind — CI only)
 zig fmt --check .                           # format check (CI runs this)
 zig fmt .                                   # apply formatting
 ```
@@ -207,6 +209,8 @@ src/              ← Lane A library. Crypto primitives, top-level scheme.
   params.zig      ← all 12 parameter sets (FIPS 205 §11 Table 2).
   address.zig     ← 22-byte compressed ADRS (FIPS 205 §11.2).
   util.zig        ← Algorithms 4 (base_2b) + 3 (toByte).
+  ct.zig          ← constant-time audit hooks (declassify). Zero-cost unless
+                    built with Valgrind support; see tests/ctgrind/.
   hash.zig        ← family dispatcher (sha2 vs shake).
   hash_sha2.zig   ← FIPS 205 §11.2 six-function adapter.
   hash_shake.zig  ← FIPS 205 §11.1 six-function adapter.
@@ -219,6 +223,11 @@ tests/            ← Lane A test infrastructure (KAT runner + main).
   kat_runner.zig  ← ACVP JSON parser + dispatcher.
   kat_main.zig    ← CLI for `zig build kat`.
   vectors/        ← NIST ACVP vector files (gitignored except README.md).
+  fuzz/           ← std.testing.fuzz harnesses + vendored test runner (#9).
+  ctgrind/        ← constant-time harnesses (#34). taint_components.zig
+                    (primitives), taint_sign.zig (whole keygen + sign),
+                    negative_control.zig (proves the taint isn't inert).
+                    Only meaningful under Valgrind — CI-only, x86_64-only.
 
 bench/            ← Lane A benchmarks.
   bench.zig       ← the harness itself (`zig build bench`).

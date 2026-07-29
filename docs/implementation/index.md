@@ -16,9 +16,9 @@ How this particular library is built, as distinct from what SLH-DSA is.
 
     ---
 
-    What is secret and what only looks secret, plus the ctgrind harness that
-    verifies the claim empirically — including why the whole-signing audit is
-    still open.
+    What is secret and what only looks secret, plus the ctgrind harnesses that
+    verify the claim empirically — and the declassification hooks that make an
+    end-to-end signing audit possible at all.
 
 -   **[How this is tested](testing.md)**
 

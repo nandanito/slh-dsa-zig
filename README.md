@@ -10,9 +10,9 @@ stateless hash-based post-quantum signature scheme also known as SPHINCS+.
 > 🚧 **EXPERIMENTAL — DO NOT USE IN PRODUCTION.**
 >
 > This library is under active development. The cryptographic core is implemented and passes
-> the NIST ACVP vectors for all 12 parameter sets, but it has **not been audited**, and
-> constant-time verification is only partially complete (secret-processing primitives are
-> verified; the full signing path is not — see [#34](https://github.com/nandanito/slh-dsa-zig/issues/34)).
+> the NIST ACVP vectors for all 12 parameter sets, but it has **not been audited** by a third
+> party. Constant-time verification now covers key generation and signing end-to-end under
+> Valgrind, on x86-64 only and with AVX-512 paths excluded ([#6](https://github.com/nandanito/slh-dsa-zig/issues/6)).
 > Passing KATs proves conformance to the spec, not resistance to an attacker. The repository is
 > published openly to support deep learning, public review, and eventual upstream contribution.
 > Do not use it to protect anything you care about.
@@ -57,7 +57,7 @@ post-quantum cryptography effort in Zig, and the direct successor to
 | SLH-DSA sign / verify | FIPS 205 §9.2–9.3, §10 | ✅ ACVP sigGen/sigVer KATs pass (all 12 sets, internal + external) · pre-hash deferred |
 | NIST ACVP KAT runner | — | ✅ keyGen · sigGen · sigVer modes (pre-hash groups skipped) |
 | Benchmarks vs PQClean | — | ✅ Published against pinned PQClean `clean` — all 36 measurements inside the 2× gate, worst 1.15× (#10) · SHA-2 sets lean on ARMv8 hardware; x86-64 re-measure open (#40) |
-| Constant-time verification | ctgrind / valgrind | 🚧 WOTS+/FORS secret-processing primitives verified constant-time under Valgrind, both hash families (#34); full-sign audit deferred |
+| Constant-time verification | ctgrind / valgrind | ✅ Key generation + signing verified constant-time in SK.seed/SK.prf under Valgrind, plus the WOTS+/FORS primitives in isolation (#34) · run on SHAKE/SHA2-128f + 192f, which cover every adapter code path (incl. the SHA-512 widening); other sets differ only in public tree geometry · x86-64-v3 only; AVX-512 paths open (#6) |
 | Fuzz harnesses | std.testing.fuzz | 🚧 Harnesses wired (verify, ACVP parser); cumulative nightly fuzzing accruing toward the 24h gate (#9) |
 
 Legend: ✅ implemented and tested · 🚧 skeleton / in progress · ⏳ planned · ❌ not started
@@ -240,9 +240,10 @@ arrives as early as possible (see issue #7):
 
 - [x] Fuzz harnesses + cumulative nightly fuzzing (issue #9) — harnesses and the
       nightly workflow are merged; the 24h cumulative accrual itself runs in CI
-- [ ] Constant-time audit pass (ctgrind / valgrind) — component-level pass merged
-      (secret-processing primitives, both hash families); whole-signing audit
-      needs in-library declassify hooks (issue #34)
+- [x] Constant-time audit pass (ctgrind / valgrind, issue #34) — component-level
+      and whole-path (keygen + sign) taint tracking, both hash families, with a
+      negative control against vacuity. Lifting the `x86-64-v3` pin so the
+      AVX-512 paths are covered too is open as issue #6
 - [x] Benchmark suite + pinned PQClean comparison (issue #10) — gate pinned to
       PQClean `clean` and measured: 36/36 inside 2×, worst 1.15×. Re-measure on
       x86-64 with AVX2 reported alongside is open as issue #40
