@@ -19,7 +19,11 @@
         "tests",
         "bench",
         "examples",
+        // Both licences ship: the four .md files below are documentation and are
+        // CC BY 4.0, so a consumer receiving them without LICENSE-DOCS would hold
+        // prose whose terms are not in the package.
         "LICENSE",
+        "LICENSE-DOCS",
         "README.md",
         "SECURITY.md",
         "ARCHITECTURE.md",

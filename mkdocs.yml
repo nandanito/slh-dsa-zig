@@ -10,7 +10,12 @@ repo_url: https://github.com/nandanito/slh-dsa-zig
 repo_name: nandanito/slh-dsa-zig
 edit_uri: edit/main/docs/
 
-copyright: Licensed 0BSD. FIPS 205 is a U.S. government publication in the public domain.
+copyright: >-
+  Documentation licensed
+  <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a> —
+  reuse it, credit it. Code licensed
+  <a href="https://opensource.org/license/0bsd">0BSD</a>.
+  FIPS 205 is a U.S. government publication in the public domain.
 
 docs_dir: docs
 

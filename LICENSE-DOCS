@@ -1,0 +1,71 @@
+Creative Commons Attribution 4.0 International (CC BY 4.0)
+
+SPDX-License-Identifier: CC-BY-4.0
+
+Copyright (c) 2026 Nandan Sridharamurthy
+
+
+SCOPE
+-----
+
+This licence covers the **documentation** in this repository:
+
+  docs/            the learning site published at https://nandan.me/slh-dsa-zig/
+  *.md             top-level prose documents (README, ARCHITECTURE, MILESTONES,
+                   CONTRIBUTING, SECURITY, and the like)
+
+It does NOT cover the software. All source code — everything under `src/`,
+`tests/`, `bench/`, `examples/`, `build.zig`, and `build.zig.zon` — remains
+licensed under 0BSD; see LICENSE. Code samples embedded inside a documentation
+page are part of the software and are 0BSD, not CC BY.
+
+Where a file could plausibly be read as either, treat it as code.
+
+
+WHY THE SPLIT
+-------------
+
+0BSD is deliberately the "no strings at all" licence: it grants permission to
+use, copy, modify and distribute with no attribution requirement whatsoever.
+That is the right posture for cryptographic library code, which should be as
+easy as possible to vendor, adapt, and re-license downstream.
+
+It is the wrong posture for the prose. The documentation here — particularly
+the "How it works" chapters and the build-it-yourself study path — is original
+explanatory work, and the expectation is that someone who learns from it and
+goes on to write their own implementation says so. CC BY 4.0 makes that
+expectation explicit rather than leaving it as an unenforceable hope.
+
+The requirement is only credit. Commercial use, adaptation, translation, and
+redistribution are all permitted.
+
+
+FULL LICENCE TEXT
+-----------------
+
+The complete legal code is at:
+
+  https://creativecommons.org/licenses/by/4.0/legalcode
+
+A plain-language summary is at:
+
+  https://creativecommons.org/licenses/by/4.0/
+
+The canonical text is the one at the URLs above. Nothing in this file modifies
+it; this file states scope and rationale only.
+
+
+HOW TO ATTRIBUTE
+----------------
+
+A credit line along these lines satisfies the licence:
+
+  "slh-dsa-zig documentation" by Nandan Sridharamurthy, licensed under
+  CC BY 4.0. https://nandan.me/slh-dsa-zig/
+
+Retain the licence notice, indicate whether you made changes, and do not imply
+the author endorses you or your use.
+
+If the documentation helped you build something — an implementation, a talk, a
+course — a mention is what this licence asks for, and it is genuinely
+appreciated.

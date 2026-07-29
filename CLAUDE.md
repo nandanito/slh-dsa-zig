@@ -196,7 +196,10 @@ change works if you didn't actually run the build.
   binaries use `std.heap.ArenaAllocator` on `std.heap.page_allocator`.
 - **No dependencies.** Zig stdlib only. This matches what upstream will
   eventually require.
-- **License:** 0BSD. Match the rest of the repo.
+- **License:** 0BSD for code (`src/`, `tests/`, `bench/`, `examples/`, build
+  files). **CC BY 4.0** for documentation (`docs/`, top-level `*.md`) — see
+  `LICENSE-DOCS`. Code samples inside a docs page are code, so 0BSD. When adding
+  a file, match whichever it is; if it could be read as either, treat it as code.
 
 ---
 
