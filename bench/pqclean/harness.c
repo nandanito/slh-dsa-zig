@@ -45,6 +45,18 @@
 #define CAT(a, b) XCAT(a, b)
 #define F(sym) CAT(PQC_PREFIX, sym)
 
+/* Which PQClean implementation variant this binary was linked against, as it
+ * should appear in the CSV `impl` column. run.sh passes -DPQC_IMPL_LABEL; the
+ * default keeps a hand-built harness honest about what it measured.
+ *
+ * This is not cosmetic. `clean` is the pinned gate reference (portable C);
+ * `avx2` is reported alongside for honesty but is NOT what the 2x gate is
+ * measured against. A row mislabelled `pqclean-clean` while holding avx2
+ * timings would silently move the gate. */
+#ifndef PQC_IMPL_LABEL
+#define PQC_IMPL_LABEL "pqclean-clean"
+#endif
+
 #define SK_BYTES   F(CRYPTO_SECRETKEYBYTES)
 #define PK_BYTES   F(CRYPTO_PUBLICKEYBYTES)
 #define SIG_BYTES  F(CRYPTO_BYTES)
@@ -103,7 +115,8 @@ static void report(const char *param_set, const char *op, uint64_t *ns, size_t i
         sum += (unsigned long long)ns[i];
     }
 
-    printf("pqclean-clean,%s,%s,%zu,%llu,%llu,%llu,%llu\n",
+    printf("%s,%s,%s,%zu,%llu,%llu,%llu,%llu\n",
+           PQC_IMPL_LABEL,
            param_set,
            op,
            iters,

@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 #
-# Build and run the PQClean `clean` reference side of the 2x performance gate.
+# Build and run the PQClean reference side of the 2x performance gate.
+#
+# Defaults to the `clean` variant, which is what the gate is pinned to. Set
+# PQCLEAN_VARIANT=avx2 to measure the vectorised implementation instead --
+# reported alongside the gate, never as the gate (x86-64 only; see issue #40).
 #
 # Emits CSV on stdout (impl,param_set,op,iters,median_ns,mean_ns,min_ns,max_ns)
 # and a provenance header on stderr, so a published number can be traced back
@@ -9,6 +13,7 @@
 #   ./bench/pqclean/run.sh                       # clone PQClean, build, run all 12
 #   PQCLEAN_DIR=/path/to/PQClean ./run.sh        # reuse an existing checkout
 #   PQCLEAN_REF=<sha> ./run.sh                   # pin a specific commit
+#   PQCLEAN_VARIANT=avx2 ./run.sh                # vectorised variant (x86-64)
 #   KEYGEN_ITERS=100 SIGN_ITERS=100 ./run.sh     # override the iteration budgets
 #   PARAM_SETS="sphincs-shake-128f-simple" ./run.sh
 #
@@ -28,6 +33,39 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # measured against. Override with PQCLEAN_REF to compare a different revision.
 PQCLEAN_REF="${PQCLEAN_REF:-202a8f96315f9ed219387a50f7e40d04af037ea8}"
 PQCLEAN_URL="${PQCLEAN_URL:-https://github.com/PQClean/PQClean.git}"
+
+# Which PQClean implementation to build. `clean` is the pinned reference the 2x
+# gate is measured against -- portable C, no intrinsics, available for every
+# parameter set on every target. `avx2` is x86-64 only and is reported
+# *alongside* the gate for honesty, never as the gate itself (bench/README.md).
+#
+# A parameter set with no directory for the requested variant is skipped with a
+# warning rather than failing the run: PQClean's avx2 coverage is not uniform,
+# and a partial avx2 table is more useful than no table.
+PQCLEAN_VARIANT="${PQCLEAN_VARIANT:-clean}"
+VARIANT_UPPER="$(echo "$PQCLEAN_VARIANT" | tr '[:lower:]' '[:upper:]')"
+
+# Fail fast on an impossible variant/host pairing. PQClean ships an `avx2`
+# directory for every SPHINCS+ set regardless of host, so the per-set
+# "directory missing -> skip" check below never fires for it; without this
+# guard an arm64 run gets as far as `make` and dies on
+# `unsupported option '-mavx2'`, several minutes in and with a compiler error
+# that says nothing about why it was attempted.
+#
+# Erroring rather than skipping is deliberate: a silent skip on the wrong host
+# produces an empty table that reads like a measured result.
+if [ "$PQCLEAN_VARIANT" = "avx2" ]; then
+    case "$(uname -m)" in
+        x86_64|amd64) ;;
+        *)
+            echo "error: PQCLEAN_VARIANT=avx2 requires an x86-64 host (this is $(uname -m))." >&2
+            echo "       The avx2 variant is reported alongside the 2x gate, not as the gate;" >&2
+            echo "       run it on x86-64 (see .github/workflows/bench.yml) or use the default" >&2
+            echo "       PQCLEAN_VARIANT=clean, which is the pinned reference on every target." >&2
+            exit 2
+            ;;
+    esac
+fi
 
 WORK="${WORK:-${TMPDIR:-/tmp}/slh-dsa-pqclean-bench}"
 PQCLEAN_DIR="${PQCLEAN_DIR:-$WORK/PQClean}"
@@ -115,8 +153,9 @@ mkdir -p "$BUILD"
 # ---------------------------------------------------------------------------
 
 {
-    echo "# slh-dsa-zig <-> PQClean clean comparison"
+    echo "# slh-dsa-zig <-> PQClean $PQCLEAN_VARIANT comparison"
     echo "# pqclean_commit: $(git -C "$PQCLEAN_DIR" rev-parse HEAD)"
+    echo "# pqclean_variant: $PQCLEAN_VARIANT$([ "$PQCLEAN_VARIANT" = clean ] || echo '  (NOT the gate reference — reported alongside only)')"
     echo "# cc:             $CC — $($CC --version 2>&1 | head -1)"
     echo "# harness_cflags: $HARNESS_CFLAGS"
     echo "# uname:          $(uname -srm)"
@@ -149,14 +188,18 @@ done
 echo "impl,param_set,op,iters,median_ns,mean_ns,min_ns,max_ns"
 
 for ps in $PARAM_SETS; do
-    src_dir="$PQCLEAN_DIR/crypto_sign/$ps/clean"
+    src_dir="$PQCLEAN_DIR/crypto_sign/$ps/$PQCLEAN_VARIANT"
     if [ ! -d "$src_dir" ]; then
+        if [ -d "$PQCLEAN_DIR/crypto_sign/$ps" ]; then
+            echo "warning: $ps has no '$PQCLEAN_VARIANT' implementation, skipping" >&2
+            continue
+        fi
         echo "error: no such parameter set: $ps" >&2
         exit 1
     fi
 
     # PQClean symbol prefix: uppercase the directory name, strip dashes.
-    prefix="PQCLEAN_$(echo "$ps" | tr -d '-' | tr '[:lower:]' '[:upper:]')_CLEAN_"
+    prefix="PQCLEAN_$(echo "$ps" | tr -d '-' | tr '[:lower:]' '[:upper:]')_${VARIANT_UPPER}_"
 
     # Speed class drives the iteration budget, matching bench.zig::defaultBudget.
     # The "s" (small-signature) sets sign 20-100x slower than their "f" siblings.
@@ -184,15 +227,16 @@ for ps in $PARAM_SETS; do
     make -s -C "$src_dir" clean >/dev/null 2>&1 || true
     make -s -C "$src_dir" CC="$CC" >/dev/null
 
-    lib="$src_dir/lib${ps}_clean.a"
+    lib="$src_dir/lib${ps}_${PQCLEAN_VARIANT}.a"
     if [ ! -f "$lib" ]; then
         echo "error: expected library not produced: $lib" >&2
         exit 1
     fi
 
-    bin="$BUILD/harness_$ps"
+    bin="$BUILD/harness_${ps}_${PQCLEAN_VARIANT}"
     $CC $HARNESS_CFLAGS \
         -DPQC_PREFIX="$prefix" \
+        -DPQC_IMPL_LABEL="\"pqclean-$PQCLEAN_VARIANT\"" \
         -I"$src_dir" -I"$COMMON" \
         -o "$bin" "$HERE/harness.c" "$lib" $COMMON_OBJS
 
