@@ -148,7 +148,9 @@ external (context-string) interfaces.
 
 ### Deferred / follow-ups
 
-- **#8** — HashSLH-DSA (pre-hash) variants; those ACVP groups are skipped.
+- **#45** — HashSLH-DSA (pre-hash) variants; those ACVP groups are skipped.
+  (Originally tracked as part of #8, which bundled it with the `ctx` parameter.
+  The `ctx` half landed here; #8 was closed and the pre-hash half moved to #45.)
 - **#28** — run the ACVP KAT suite in CI with a vector-fetch strategy.
 
 ### Reference
@@ -159,5 +161,125 @@ Key commit: `2cc99bb` (sigGen/sigVer KAT wiring).
 
 ---
 
-*Milestone 3 (hardening — constant-time audit, fuzz harnesses, PQClean
-benchmarks) will be appended here as it progresses.*
+## Milestone 3 — Hardening and release (complete, 2026-07-29)
+
+**Goal:** move from "passes the KATs" to "defensible" — empirical constant-time
+verification, fuzz coverage, a published performance comparison, and enough
+documentation that a reader can check the reasoning rather than trust it.
+
+The recurring theme of this milestone was that **each gate turned out to be
+measuring something narrower than it claimed**, and most of the work went into
+closing the gap between the claim and the measurement.
+
+### Fuzzing (#9 → `c461ece`, 2026-07-24)
+
+The original gate said "≥24h fuzzing in CI". GitHub Actions caps a job at 6h, so
+that gate could never have been met as written. It was replaced with a
+*cumulative* one: a nightly workflow fuzzes a bounded window, persists the
+corpus, and a component graduates once accrued time crosses the threshold.
+
+Two Zig 0.16 obstacles shaped the implementation. The stock test runner does not
+compile under `--fuzz` (a `StackTrace` type split), which forced a vendored
+patched runner. And `--fuzz=N` exits 0 even when it finds a crash, so failure has
+to be detected out of band rather than from the exit code — a silent-success
+failure mode that would have made the whole job decorative.
+
+**#33** then made the PR-time fuzz smoke a required status check, so the nightly
+job is a depth gate rather than the only thing standing between a regression and
+`main`.
+
+### Constant-time audit (#34 → `f9e93aa`, `3138c31`)
+
+Landed in two passes: component-level taint tracking first, then the whole
+keygen + sign path.
+
+The blocker on the second pass was **classification, not correctness**.
+`PK_FORS` and each XMSS root descend from `SK.seed`, so taint propagation marked
+them undefined — but each is the message the next WOTS+ signs, and its base-`w`
+digits set that layer's chain lengths. A tainted value gating a loop bound made
+memcheck report thousands of errors on code that is constant-time. FIPS 205
+§9.3/§7.2 has the verifier recompute both from the published signature; nothing
+had told Valgrind that. `src/ct.zig` supplies the missing half — `declassify`,
+gated on `builtin.valgrind_support`, called at exactly three sites (`R`,
+`PK_FORS`, each XMSS root), each citing the algorithm that publishes the value.
+Kept deliberately minimal: declassifying more would silence the same false
+positives and blind the audit to a real leak.
+
+A **negative control** was added alongside, because a taint harness that has gone
+inert reports the same clean result as one that is genuinely passing. The control
+fires first; the two clean runs only mean something because it does.
+
+Review also caught a real hole behind a cosmetic-looking finding: the harness ran
+only 128f, but FIPS 205 §11.2 widens `H`/`T_l`/`H_msg` to SHA-512 and `PRF_msg`
+to HMAC-SHA-512 at `n > 16` — and `SK.prf` is that HMAC's key, so secret-keyed
+SHA-512 was entirely unaudited. Coverage was extended to 128f + 192f across both
+families rather than hedging the README wording.
+
+### Benchmarks (#10 → `c0abd63`, 2026-07-28)
+
+The 2× gate was pinned to PQClean's portable `clean` variant and measured:
+**36/36 inside the gate, worst ratio 1.15×.** The comparison harness lives in
+`bench/pqclean/` and is deliberately outside the Zig build graph, so `zig build`
+still needs no C toolchain.
+
+The honest caveat is recorded in **#40**: the run was on arm64, where Zig's
+SHA-256 takes an ARMv8 crypto-extension path while PQClean `clean` is portable C
+*by definition of the pinned variant*. Rebuilding with the extensions disabled
+inverts the SHA-2 half — Zig's portable SHA-256 is roughly half the speed of
+PQClean's portable C. The SHAKE sets pass on their own merits (0.89×–1.15×,
+neither side vectorised); the SHA-2 sets are carried by a CPU feature. An x86-64
+re-measure is open.
+
+### Documentation (#36 → `319b967`, #39, #43 → `f0814a0`)
+
+A learning-oriented mkdocs site at <https://nandan.me/slh-dsa-zig/>: why
+hash-based signatures exist, a chapter per component in dependency order,
+per-module walkthroughs mapped to FIPS 205, and a glossary. **#39** fixed
+Material icon shortcodes rendering as literal text — `mkdocs build --strict`
+does not catch that, so the CI guard asserts on built output instead. **#43**
+added a build-it-yourself study path with per-stage exercises and self-check
+questions, plus a stage on what these schemes cost on constrained hardware.
+
+### The upstream decision (#11, closed 2026-07-29)
+
+#11 was to ask the Ziglang project whether `std.crypto.sign.slh_dsa` was wanted
+before spending Lane B effort. It was closed without being asked, because the
+question turned out to have no venue.
+
+Zig moved from GitHub to Codeberg in November 2025, so the proposed venue no
+longer exists. More decisively, the Code of Conduct now prohibits — in the
+ziglang Codeberg org, `#zig` on Libera, and the development Zulip — LLM-generated
+content, paraphrasing, editing, brainstorming-then-writing-it-yourself, using
+LLMs to find bugs, and *talking about* LLM use. The plan in #11 was to disclose
+this repository's two-lane structure openly and ask what provenance evidence
+would be accepted; that post would itself violate the CoC, and discussing the CoC
+is separately out of bounds.
+
+The two-lane arrangement was designed against an earlier and much narrower
+version of that policy. Rather than carry a blocked assumption through the
+schedule, **upstreaming came off the roadmap** and became a separate decision to
+be taken deliberately later. `upstream-candidate/` stays reserved with its rules
+in force. The standalone library was promoted to the primary goal.
+
+### Outcome
+
+Phase gates 1 (functional), 2 (constant-time), 4 (benchmark) and 5
+(documentation) satisfied; gate 3 (fuzz) accrues nightly. The `🚧 EXPERIMENTAL`
+banner stays up — it comes down for a third-party audit, not for a green CI run.
+
+### Deferred / follow-ups
+
+- **#40** — re-measure the 2× gate on x86-64, report PQClean `avx2` alongside,
+  and confirm whether Zig's SHA-2 dispatches to SHA-NI there.
+- **#38** — iterative treehash for `xmss_sign`; the auth path recomputes shared
+  subtrees. The most embedded-relevant open item.
+- **#6** — lift the ctgrind `x86-64-v3` pin once Valgrind can decode AVX-512.
+  Externally blocked.
+- **#45** — HashSLH-DSA pre-hash variants.
+
+### Reference
+
+Issues: #9, #33 (fuzz), #34 (constant-time), #10 (benchmarks), #36, #39, #43
+(docs), #11 (upstream decision), #8 (closed — already complete).
+PRs: #41 (benchmarks), #42 (whole-path CT audit), #44 (study path + roadmap).
+Key commits: `c461ece`, `f9e93aa`, `3138c31`, `c0abd63`, `319b967`, `f0814a0`.

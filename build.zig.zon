@@ -1,10 +1,11 @@
 .{
     .name = .slh_dsa,
-    .version = "0.0.0-dev",
+    .version = "0.1.0",
 
-    // Fingerprint is a unique identifier for the package. Regenerate via
-    // `zig init` if forking. The value below is a placeholder; replace before
-    // tagging a release.
+    // Fingerprint is this package's permanent identity — it survives renames and
+    // is how the package manager tells one package from another. It is NOT a
+    // per-release value: do not regenerate it when tagging. Regenerate via
+    // `zig init` only when forking into a genuinely different package.
     .fingerprint = 0x748fe196f69178d2,
 
     .minimum_zig_version = "0.16.0",
@@ -18,7 +19,6 @@
         "tests",
         "bench",
         "examples",
-        "upstream-candidate",
         "LICENSE",
         "README.md",
         "SECURITY.md",
