@@ -14,7 +14,7 @@ stateless hash-based post-quantum signature scheme also known as SPHINCS+.
 > party. Constant-time verification now covers key generation and signing end-to-end under
 > Valgrind, on x86-64 only and with AVX-512 paths excluded ([#6](https://github.com/nandanito/slh-dsa-zig/issues/6)).
 > Passing KATs proves conformance to the spec, not resistance to an attacker. The repository is
-> published openly to support deep learning, public review, and eventual upstream contribution.
+> published openly to support deep learning and public review.
 > Do not use it to protect anything you care about.
 
 📖 **[Documentation site](https://nandan.me/slh-dsa-zig/)** — a learning-oriented
@@ -25,15 +25,23 @@ walkthroughs mapped to FIPS 205, and a glossary. Built from [`docs/`](docs/).
 
 Zig's standard library already ships [ML-KEM (FIPS 203)](https://github.com/ziglang/zig/tree/master/lib/std/crypto/ml_kem)
 and [ML-DSA (FIPS 204)](https://github.com/ziglang/zig/tree/master/lib/std/crypto/ml_dsa) in `std.crypto`.
-It does **not** ship SLH-DSA. This project closes that gap, with two parallel goals:
+It does **not** ship SLH-DSA. This project closes that gap, with two goals:
 
 1. **A usable standalone library** for projects that need hash-based PQ signatures *today* and
-   are willing to accept "experimental" status, with a clear runway to production.
-2. **A foundation for upstream contribution** to `std.crypto.sign.slh_dsa`. The
-   [`upstream-candidate/`](upstream-candidate/) directory is reserved for that effort and
-   follows a stricter authorship discipline (see [Lane A vs Lane B](#lane-a-vs-lane-b) below).
+   are willing to accept "experimental" status, with a clear runway to production. This is the
+   primary goal and the one the roadmap is ordered around.
+2. **A way to learn post-quantum cryptography properly**, in public. The
+   [documentation site](https://nandan.me/slh-dsa-zig/) is written to teach the scheme rather
+   than merely describe the code, and includes a
+   [build-it-yourself study path](https://nandan.me/slh-dsa-zig/build-it-yourself/) for readers
+   who want to derive SLH-DSA from FIPS 205 themselves.
 
-`slh-dsa-zig` is the first phase of [pq-zig](https://github.com/nandanito) — a multi-phase
+The [`upstream-candidate/`](upstream-candidate/) directory remains reserved for a possible
+future contribution to `std.crypto`, under a stricter authorship discipline (see
+[Lane A vs Lane B](#lane-a-vs-lane-b) below). It is not on the roadmap — see
+[Roadmap](#roadmap) for why.
+
+`slh-dsa-zig` is the first phase of [pq-zig](https://github.com/pq-zig) — a multi-phase
 post-quantum cryptography effort in Zig, and the direct successor to
 [tweetnacl-zig](https://github.com/nandanito/tweetnacl-zig).
 
@@ -247,16 +255,23 @@ arrives as early as possible (see issue #7):
 - [x] Benchmark suite + pinned PQClean comparison (issue #10) — gate pinned to
       PQClean `clean` and measured: 36/36 inside 2×, worst 1.15×. Re-measure on
       x86-64 with AVX2 reported alongside is open as issue #40
-- [ ] Upstream temperature check before Lane B starts (issue #11)
 - [ ] First tagged release (`v0.1.0` — experimental)
-- [ ] Upstream PR draft to `std.crypto.sign.slh_dsa`
 
 Documentation is tracked separately: the learning-oriented
 [documentation site](https://nandan.me/slh-dsa-zig/) (issue #36) covers the
-design rationale, per-component walkthroughs, and a glossary.
+design rationale, per-component walkthroughs, a glossary, and a
+[build-it-yourself study path](https://nandan.me/slh-dsa-zig/build-it-yourself/).
 
-Phases 2 and 3 (`pq-nacl`, `agez`) are tracked in the parent [pq-zig](https://github.com/nandanito)
-organisation.
+**On upstreaming.** Contributing to `std.crypto` is no longer tracked as a
+roadmap item. Ziglang's contribution policy tightened considerably during this
+project's lifetime, and the two-lane arrangement was designed against an earlier,
+narrower version of it; issue #11 records what changed. Nothing about that
+diminishes the standalone library, which is what this repository is now optimised
+for. Whether a Lane B effort ever happens is a separate decision, to be taken
+deliberately rather than carried along as an assumption.
+
+Phases 2 and 3 (`pq-nacl`, `agez`) are tracked in the parent
+[pq-zig](https://github.com/pq-zig) organisation.
 
 ## Design and contributing
 
