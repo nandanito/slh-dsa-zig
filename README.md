@@ -1,7 +1,8 @@
 # slh-dsa-zig
 
 [![CI](https://github.com/nandanito/slh-dsa-zig/actions/workflows/ci.yml/badge.svg)](https://github.com/nandanito/slh-dsa-zig/actions/workflows/ci.yml)
-[![License: 0BSD](https://img.shields.io/badge/License-0BSD-blue.svg)](https://opensource.org/license/0bsd)
+[![Code: 0BSD](https://img.shields.io/badge/Code-0BSD-blue.svg)](https://opensource.org/license/0bsd)
+[![Docs: CC BY 4.0](https://img.shields.io/badge/Docs-CC%20BY%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by/4.0/)
 [![Zig](https://img.shields.io/badge/Zig-0.16.0-orange)](https://ziglang.org/)
 
 A pure-Zig implementation of **SLH-DSA** ([FIPS 205](https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.205.pdf)) — the
@@ -287,5 +288,20 @@ Found a bug that may affect security? Please follow the responsible disclosure p
 
 ## License
 
-[0BSD](LICENSE) — same permissive licence Zig's standard library uses, and the same
+Split, deliberately.
+
+**Code — [0BSD](LICENSE).** Everything under `src/`, `tests/`, `bench/`, `examples/`, and the
+build files. The same permissive licence Zig's standard library uses, and the same
 philosophical posture as TweetNaCl: take the code, do what you want with it, just don't sue.
+No attribution required. Code samples inside a documentation page are code, and are 0BSD.
+
+**Documentation — [CC BY 4.0](LICENSE-DOCS).** Everything under `docs/` and the top-level
+prose. Reuse, adapt, translate, sell — the only condition is credit.
+
+The split exists because 0BSD is the *"no strings at all"* licence: it deliberately drops
+even the attribution clause that MIT and BSD-2 keep. That is right for cryptographic library
+code, which should be as easy as possible to vendor and adapt. It is wrong for the prose —
+the [How it works](https://nandan.me/slh-dsa-zig/concepts/) chapters and the
+[study path](https://nandan.me/slh-dsa-zig/build-it-yourself/) are original explanatory work,
+and if they help you build your own implementation, saying so is the ask. CC BY makes that
+explicit instead of leaving it an unenforceable hope.
