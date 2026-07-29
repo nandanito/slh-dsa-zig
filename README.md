@@ -126,7 +126,7 @@ exe.root_module.addImport("slh_dsa", slh_dsa_dep.module("slh_dsa"));
 The public API is comptime-parameterised; you pick a parameter set and get back a namespace
 with key/signature byte sizes and the operations. Key generation, signing, and verification
 are implemented (pure SLH-DSA with context strings); the HashSLH-DSA pre-hash variants are
-deferred (issue #8).
+deferred (issue #45).
 
 ```zig
 const std = @import("std");
