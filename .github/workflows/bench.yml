@@ -1,0 +1,265 @@
+name: bench
+
+# The x86-64 leg of the 2x performance gate (issue #40).
+#
+# The published gate numbers in bench/README.md were measured on arm64, where
+# Zig's SHA-256 takes an ARMv8 crypto-extension path while PQClean `clean` is
+# portable C *by definition of the pinned variant*. That makes the SHA-2 half of
+# a passing result a property of the CPU rather than of the code. This workflow
+# measures the same gate on x86-64 with the hash path pinned explicitly, so the
+# accelerated and unaccelerated numbers are both on the record.
+#
+# Manual only. A full 12-set run takes tens of minutes and the numbers are for
+# publishing, not for gating a PR -- a shared CI runner is too noisy a machine
+# to fail a build on. Nothing here blocks a merge.
+
+on:
+  workflow_dispatch:
+    inputs:
+      param_sets:
+        description: 'Space-separated FIPS 205 names, or "all"'
+        required: false
+        default: 'all'
+      run_accelerated:
+        description: 'Also measure with SHA-NI enabled (skipped if the runner lacks it)'
+        type: boolean
+        required: false
+        default: true
+      run_avx2:
+        description: 'Also measure PQClean avx2 (reported alongside, never the gate)'
+        type: boolean
+        required: false
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  bench-x86-64:
+    name: 2x gate on x86-64
+    runs-on: ubuntu-latest      # x86_64
+    timeout-minutes: 330        # under the 6h job cap with room to spare
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@v2.2.1
+        with:
+          version: 0.16.0
+
+      # -----------------------------------------------------------------------
+      # Record the machine. Which SHA-2 path Zig compiles is decided by the
+      # target CPU features, so the runner's capabilities are part of the
+      # result, not background detail.
+      # -----------------------------------------------------------------------
+      - name: Record CPU and toolchain
+        id: cpu
+        run: |
+          set -euo pipefail
+          model="$(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2- | sed 's/^ *//')"
+          flags="$(grep -m1 '^flags' /proc/cpuinfo | cut -d: -f2-)"
+
+          has_sha=no; has_avx2=no
+          case " $flags " in *" sha_ni "*) has_sha=yes ;; esac
+          case " $flags " in *" avx2 "*)  has_avx2=yes ;; esac
+
+          {
+            echo "model=$model"
+            echo "has_sha=$has_sha"
+            echo "has_avx2=$has_avx2"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "## Machine"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| CPU | \`$model\` |"
+            echo "| SHA-NI (\`sha_ni\`) | **$has_sha** |"
+            echo "| AVX2 | **$has_avx2** |"
+            echo "| Zig | \`$(zig version)\` |"
+            echo "| cc | \`$(cc --version | head -1)\` |"
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # -----------------------------------------------------------------------
+      # THE GATE. -Dcpu=x86_64_v3 has AVX2 but not SHA-NI, so Zig's SHA-256
+      # compiles to its portable path -- the like-for-like comparison against
+      # PQClean `clean`, which is portable C.
+      #
+      # x86_64_v3 rather than the runner's native CPU because native varies
+      # between runners and would make consecutive runs incomparable. It also
+      # matches the CPU baseline the ctgrind workflow pins (issue #6).
+      # -----------------------------------------------------------------------
+      - name: Gate — Zig portable SHA-2 vs PQClean clean
+        env:
+          PARAM_SETS_INPUT: ${{ inputs.param_sets }}
+        run: |
+          set -euo pipefail
+          if [ "$PARAM_SETS_INPUT" != "all" ]; then
+            export PARAM_SETS="$PARAM_SETS_INPUT"
+          fi
+          export ZIG_BUILD_ARGS="-Dcpu=x86_64_v3"
+          export IMPL_LABEL="slh-dsa-zig-portable"
+          ./bench/pqclean/compare.sh > gate-portable.csv 2> gate-portable.log
+          tail -40 gate-portable.log
+
+      # -----------------------------------------------------------------------
+      # The same measurement with SHA-NI compiled in. Zig's dispatch is a
+      # comptime check on the target features (std/crypto/sha2.zig requires both
+      # `sha` and `avx2`), not a runtime probe -- so this genuinely selects a
+      # different code path rather than re-running the same one.
+      #
+      # Guarded on the runner actually having sha_ni: a binary built with +sha
+      # for a CPU without it dies on SIGILL.
+      # -----------------------------------------------------------------------
+      - name: Accelerated — Zig SHA-NI vs PQClean clean
+        if: ${{ inputs.run_accelerated && steps.cpu.outputs.has_sha == 'yes' }}
+        env:
+          PARAM_SETS_INPUT: ${{ inputs.param_sets }}
+        run: |
+          set -euo pipefail
+          if [ "$PARAM_SETS_INPUT" != "all" ]; then
+            export PARAM_SETS="$PARAM_SETS_INPUT"
+          fi
+          export ZIG_BUILD_ARGS="-Dcpu=x86_64_v3+sha"
+          export IMPL_LABEL="slh-dsa-zig-shani"
+          ./bench/pqclean/compare.sh > accelerated.csv 2> accelerated.log
+          tail -40 accelerated.log
+
+      - name: Note skipped acceleration
+        if: ${{ inputs.run_accelerated && steps.cpu.outputs.has_sha != 'yes' }}
+        run: |
+          echo "> **SHA-NI leg skipped** — this runner reports no \`sha_ni\` in /proc/cpuinfo." \
+            >> "$GITHUB_STEP_SUMMARY"
+          echo "> The gate numbers below are Zig's portable SHA-2 path either way." \
+            >> "$GITHUB_STEP_SUMMARY"
+
+      # -----------------------------------------------------------------------
+      # PQClean avx2, reported alongside for honesty. Explicitly NOT the gate:
+      # the gate is pinned to `clean` so that a vectorised reference cannot
+      # quietly raise the bar the Zig side is measured against.
+      # -----------------------------------------------------------------------
+      - name: Alongside — PQClean avx2
+        if: ${{ inputs.run_avx2 }}
+        env:
+          PARAM_SETS_INPUT: ${{ inputs.param_sets }}
+        run: |
+          set -euo pipefail
+          if [ "$PARAM_SETS_INPUT" != "all" ]; then
+            # run.sh takes PQClean directory names, not FIPS 205 names.
+            PARAM_SETS="$(echo "$PARAM_SETS_INPUT" | tr ' ' '\n' \
+              | sed -e 's/^SLH-DSA-/sphincs-/' \
+              | tr '[:upper:]' '[:lower:]' \
+              | sed -e 's/$/-simple/' | tr '\n' ' ')"
+            export PARAM_SETS
+          fi
+          export PQCLEAN_VARIANT=avx2
+          ./bench/pqclean/run.sh > avx2.csv 2> avx2.log
+          tail -40 avx2.log
+
+      # -----------------------------------------------------------------------
+      # Render.
+      #
+      # table.sh is the gate check, not a formatter, and its exit codes carry
+      # meaning: 0 pass, 1 a gated measurement exceeded the gate, 2 the input
+      # could not be gated at all (half a pair, or fewer rows than EXPECT).
+      # Those are treated differently here. A shared CI runner is too noisy to
+      # fail a build on a ratio, so 1 is reported and not fatal -- but 2 means
+      # the data is malformed or the sweep died partway, and a summary rendered
+      # from a truncated CSV reads exactly like a pass. That fails the step.
+      #
+      # Concatenating the two Zig legs into one CSV reproduces the published
+      # bench/README.md layout: table.sh routes any impl label matching
+      # /portable/ into the supplementary table and everything else into the
+      # gated one, so `slh-dsa-zig-shani` becomes the main table and
+      # `slh-dsa-zig-portable` the diagnostic one beneath it.
+      # -----------------------------------------------------------------------
+      - name: Render tables
+        if: always()
+        env:
+          PARAM_SETS_INPUT: ${{ inputs.param_sets }}
+        run: |
+          set -uo pipefail
+
+          # EXPECT guards against a sweep that stopped at a set boundary. It
+          # defaults to 36 (12 sets x 3 ops), so a deliberate subset must say so
+          # or every subset run would fail as "incomplete".
+          if [ "$PARAM_SETS_INPUT" = "all" ]; then
+            expect=36
+          else
+            expect=$(( $(echo "$PARAM_SETS_INPUT" | wc -w) * 3 ))
+          fi
+          export EXPECT="$expect"
+          export PORTABLE_NOTE="SHA-NI disabled"
+
+          # One CSV if both legs ran, so the gated and portable tables appear
+          # together. The PQClean rows are duplicated across the two files and
+          # awk keeps the last -- same code either way, only machine noise
+          # differs, and the note below says so.
+          combined=gate-portable.csv
+          if [ -s accelerated.csv ]; then
+            cat gate-portable.csv accelerated.csv > combined.csv
+            combined=combined.csv
+          fi
+
+          render() {
+            local title="$1" file="$2" note="$3"
+            [ -s "$file" ] || return 0
+            local out rc
+            out="$(./bench/pqclean/table.sh < "$file" 2>&1)"; rc=$?
+            {
+              echo "## $title"
+              echo
+              echo "$note"
+              echo
+              echo "$out"
+              echo
+              case "$rc" in
+                0) echo "_table.sh: pass (exit 0)._" ;;
+                1) echo "> [!WARNING]" ;
+                   echo "> \`table.sh\` exit 1 — a **gated measurement exceeded the gate**." ;
+                   echo "> Not failing the job: a shared runner is too noisy to gate a build on." ;;
+                *) echo "> [!CAUTION]" ;
+                   echo "> \`table.sh\` exit $rc — the input **could not be gated** (incomplete or malformed)." ;
+                   echo "> Treat the table above as unusable." ;;
+              esac
+              echo
+            } >> "$GITHUB_STEP_SUMMARY"
+            return $rc
+          }
+
+          worst=0
+          render "2× gate on x86-64" "$combined" \
+            "Zig \`-Dcpu=x86_64_v3+sha\` (SHA-NI) in the main table where available, \`-Dcpu=x86_64_v3\` (portable) in the supplementary one, both against the pinned portable-C reference. PQClean rows come from the last leg measured." \
+            || worst=$?
+
+          render "Alongside — PQClean avx2" avx2.csv \
+            "Vectorised reference, x86-64 only. Reported for honesty; the gate stays pinned to \`clean\`. No ratios — there is no Zig row to pair against, so this is a standalone timing table." \
+            || true
+
+          {
+            echo "---"
+            echo
+            echo "**Still open (#40):** whether the gate wording should name a target and"
+            echo "feature baseline rather than saying \"equivalent hardware\". These numbers"
+            echo "inform that decision; they do not settle it."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # Only unusable data fails the job.
+          if [ "$worst" -ge 2 ]; then
+            echo "::error::table.sh could not gate the results (exit $worst)"
+            exit 1
+          fi
+
+      - name: Upload raw results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-x86-64
+          path: |
+            *.csv
+            *.log
+          if-no-files-found: warn
+          retention-days: 90

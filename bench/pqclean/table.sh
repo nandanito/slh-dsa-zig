@@ -31,6 +31,10 @@
 #                  set explicitly to gate a deliberate subset
 #   GATE_PORTABLE  1 to also gate the portable (crypto-extensions-off) table,
 #                  which is diagnostic and ungated by default
+#   PORTABLE_NOTE  caption for the portable table, naming what was disabled
+#                  (default "hardware hash acceleration disabled"; the arm64
+#                  run passes "ARMv8 crypto extensions disabled", the x86-64
+#                  run "SHA-NI disabled")
 #
 # Lane: Lane A (bench infrastructure).
 
@@ -49,8 +53,14 @@ GATE_PORTABLE="${GATE_PORTABLE:-0}"
 # gating a deliberate subset (e.g. EXPECT=3 for one parameter set, EXPECT=18
 # for the six SHA-2 sets in a portable-only pass).
 EXPECT="${EXPECT:-36}"
+# Caption for the supplementary table. Which feature was disabled to produce a
+# portable build is target-specific -- ARMv8 crypto extensions on arm64, SHA-NI
+# on x86-64 (issue #40) -- and a caption naming the wrong architecture is worse
+# than a vague one, because it is quoted into bench/README.md verbatim.
+PORTABLE_NOTE="${PORTABLE_NOTE:-hardware hash acceleration disabled}"
 
-awk -F, -v gate="$GATE" -v expect="$EXPECT" -v gate_portable="$GATE_PORTABLE" '
+awk -F, -v gate="$GATE" -v expect="$EXPECT" -v gate_portable="$GATE_PORTABLE" \
+    -v portable_note="$PORTABLE_NOTE" '
 function fmt(ns) {
     if (ns < 1000)      return sprintf("%d ns", ns)
     else if (ns < 1e6)  return sprintf("%.2f us", ns / 1000)
@@ -123,7 +133,7 @@ END {
     }
     if (have_port) {
         print ""
-        print "Portable build (ARMv8 crypto extensions disabled), isolating the"
+        printf "Portable build (%s), isolating the\n", portable_note
         print "algorithmic comparison from hardware SHA-2 acceleration:"
         print ""
         print "| param set | op | zig (portable) | PQClean `clean` | ratio |"

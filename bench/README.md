@@ -123,6 +123,44 @@ When publishing, record all four so it is reproducible: the PQClean commit,
 the PQClean build settings, the Zig version and optimize mode, and the
 machine. `compare.sh` and `run.sh` print all of these to stderr.
 
+### The x86-64 leg
+
+The published table below was measured on arm64, where the SHA-2 half of the
+result is carried by ARMv8 crypto extensions rather than by the code (see
+[Caveats on this run](#caveats-on-this-run)). Issue #40 tracks the x86-64
+re-measure, and `.github/workflows/bench.yml` runs it — manually triggered,
+never gating a PR, because a shared runner is too noisy to fail a build on.
+
+It measures three things:
+
+| leg | build | role |
+|---|---|---|
+| portable | `-Dcpu=x86_64_v3` (AVX2, no SHA-NI) | like-for-like against portable C |
+| accelerated | `-Dcpu=x86_64_v3+sha` | what the hardware path buys |
+| `avx2` | `PQCLEAN_VARIANT=avx2` | reported alongside, never gated |
+
+`x86_64_v3` rather than the runner's native CPU: native varies between runners,
+which would make consecutive runs incomparable, and it matches the baseline the
+ctgrind workflow pins (issue #6).
+
+Zig's SHA-2 dispatch is a **comptime** check on the target features, not a
+runtime probe — `std/crypto/sha2.zig` takes its x86-64 SHA-NI path only when the
+target has both `sha` and `avx2`. So the two Zig legs genuinely compile
+different code, and a binary built for a baseline target will not opportunistically
+use SHA-NI on a CPU that has it.
+
+Two knobs exist for this:
+
+```sh
+PQCLEAN_VARIANT=avx2 ./bench/pqclean/run.sh          # x86-64 only; errors elsewhere
+PORTABLE_NOTE="SHA-NI disabled" ./bench/pqclean/table.sh < results.csv
+```
+
+`PORTABLE_NOTE` captions the supplementary table. It exists because the caption
+names what was disabled to produce the portable build, that differs by target,
+and the caption is quoted into this file verbatim — a table headed "ARMv8 crypto
+extensions disabled" on an x86-64 run would be worse than a vague one.
+
 ## Results
 
 Measured 2026-07-28. **The gate passes on this machine: all 36 measurements
