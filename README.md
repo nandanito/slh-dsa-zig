@@ -260,7 +260,16 @@ arrives as early as possible (see issue #7):
       to PQClean `clean`, measured portable-vs-portable on x86-64: 35/36 inside 2×,
       worst 2.06×, with the excess attributed to `std.crypto`'s SHA-256 by the
       SHAKE control. Accelerated (36/36) and PQClean AVX2 published alongside
-- [ ] First tagged release (`v0.1.0` — experimental)
+- [x] **First tagged release — [`v0.1.0`](https://github.com/nandanito/slh-dsa-zig/releases/tag/v0.1.0)
+      (2026-07-30, experimental).** Milestone 3 closes with it; phase gates 1
+      (functional), 2 (constant-time), 4 (benchmark) and 5 (documentation)
+      satisfied, gate 3 (fuzz) accruing nightly. The `🚧 EXPERIMENTAL` banner
+      stays until a third-party audit — a tag is not an audit
+
+**Next (post-v0.1.0):** issue #38 (iterative treehash for `xmss_sign` — the most
+embedded-relevant item, and it moves the sign column on both hash families),
+issue #45 (HashSLH-DSA pre-hash variants), issue #6 (lift the ctgrind AVX-512
+pin, blocked externally on Valgrind).
 
 Documentation is tracked separately: the learning-oriented
 [documentation site](https://nandan.me/slh-dsa-zig/) (issue #36) covers the
