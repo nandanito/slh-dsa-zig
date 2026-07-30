@@ -215,20 +215,45 @@ to HMAC-SHA-512 at `n > 16` — and `SK.prf` is that HMAC's key, so secret-keyed
 SHA-512 was entirely unaudited. Coverage was extended to 128f + 192f across both
 families rather than hedging the README wording.
 
-### Benchmarks (#10 → `c0abd63`, 2026-07-28)
+### Benchmarks (#10 → `c0abd63`; #40 → `.github/workflows/bench.yml`)
 
-The 2× gate was pinned to PQClean's portable `clean` variant and measured:
-**36/36 inside the gate, worst ratio 1.15×.** The comparison harness lives in
-`bench/pqclean/` and is deliberately outside the Zig build graph, so `zig build`
-still needs no C toolchain.
+The clearest instance of this milestone's theme: the first measurement was
+*correct* and still didn't mean what the headline said.
 
-The honest caveat is recorded in **#40**: the run was on arm64, where Zig's
-SHA-256 takes an ARMv8 crypto-extension path while PQClean `clean` is portable C
-*by definition of the pinned variant*. Rebuilding with the extensions disabled
-inverts the SHA-2 half — Zig's portable SHA-256 is roughly half the speed of
-PQClean's portable C. The SHAKE sets pass on their own merits (0.89×–1.15×,
-neither side vectorised); the SHA-2 sets are carried by a CPU feature. An x86-64
-re-measure is open.
+**#10** pinned the gate to PQClean's portable `clean` variant and measured
+36/36 inside it, worst 1.15×. But the run was on arm64, where Zig's SHA-256
+takes an ARMv8 crypto-extension path while PQClean `clean` is portable C *by
+definition of the pinned variant*. The SHAKE sets passed on their own merits;
+the SHA-2 sets were carried by a CPU feature. **#40** recorded that and
+predicted, extrapolating from an extensions-disabled rebuild, that a portable
+x86-64 run would put nine of eighteen SHA-2 measurements over the gate.
+
+The x86-64 run refuted its own issue. Actual: **one of eighteen**, mean 1.85×.
+Zig's portable SHA-256 trails PQClean's portable C by ~1.85× on x86-64-v3, not
+the ~2.05× seen on Apple silicon — a pessimistic extrapolation that did not
+survive measurement.
+
+Two decisions came out of it.
+
+**The gate is now measured portable-against-portable**, with the target named
+(`-Dcpu=x86_64_v3`) rather than left as "equivalent hardware". Gating an
+accelerated build measures the CPU's hash unit, not the library — and it is a
+gate that cannot fail for the right reason, since a regression in the
+surrounding SLH-DSA code would hide behind the hash speedup. Accelerated
+(36/36, worst 1.00×) and PQClean `avx2` (2.3×–4.3× over `clean`) are published
+alongside, never gated.
+
+**The single exceedance is attributed rather than excused.**
+`SLH-DSA-SHA2-256s keygen` sits at 2.06×. SHAKE — which differs from SHA-2 only
+in the hash primitive, sharing every line of hypertree, WOTS+, FORS and address
+code — sits at 0.96× across all eighteen measurements. That control isolates
+the excess to `std.crypto`'s portable SHA-256, which #40 scopes out of this
+project. Phase gate 4 is treated as satisfied with the exception named, which
+is a stronger and more durable claim than 36/36 measured on a machine whose
+SHA-256 unit did the work.
+
+The comparison harness lives in `bench/pqclean/` and stays deliberately outside
+the Zig build graph, so `zig build` still needs no C toolchain.
 
 ### Documentation (#36 → `319b967`, #39, #43 → `f0814a0`)
 
@@ -269,10 +294,9 @@ banner stays up — it comes down for a third-party audit, not for a green CI ru
 
 ### Deferred / follow-ups
 
-- **#40** — re-measure the 2× gate on x86-64, report PQClean `avx2` alongside,
-  and confirm whether Zig's SHA-2 dispatches to SHA-NI there.
 - **#38** — iterative treehash for `xmss_sign`; the auth path recomputes shared
-  subtrees. The most embedded-relevant open item.
+  subtrees. The most embedded-relevant open item, and the one that would move
+  the sign column on both families.
 - **#6** — lift the ctgrind `x86-64-v3` pin once Valgrind can decode AVX-512.
   Externally blocked.
 - **#45** — HashSLH-DSA pre-hash variants.

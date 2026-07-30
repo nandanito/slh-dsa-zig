@@ -93,7 +93,7 @@ These are non-negotiable for code in `src/`:
 | **Zeroize secrets** | Every secret cleared before scope exit. Use volatile semantics where the compiler may DCE the zeroing. |
 | **KAT-validated** | Scheme-level operations (keyGen/sigGen/sigVer) must pass NIST ACVP vectors before being declared functional. Components without NIST vectors (WOTS+, XMSS, FORS internals) are validated via the scheme-level KATs that exercise them, spec-derived property tests, and reference-derived intermediate fixtures where needed (issue #7). |
 | **Fuzzed** | Every parser, deserializer, and attacker-facing API gets a `std.testing.fuzz` harness. The 6h GHA job cap means the gate is *cumulative*: a nightly workflow fuzzes a bounded window, persists the corpus, and accrues ≥24h total before a component graduates. See `tests/fuzz/` and issue #9. |
-| **Benchmarked** | Performance must be within 2× of PQClean's portable `clean` C reference on equivalent hardware (AVX2 reported, not gated). See `bench/README.md`. |
+| **Benchmarked** | Within 2× of PQClean's portable `clean` C reference, **both sides built without hardware hash acceleration** — on x86-64 that means `-Dcpu=x86_64_v3` (AVX2, no SHA-NI). Accelerated and AVX2 numbers are published alongside, never gated. Gating an accelerated build measures the CPU's hash unit, not this library, and would let a regression in the surrounding SLH-DSA code hide behind it. See `bench/README.md` and issue #40. |
 | **ctgrind/valgrind-verified** | Constant-time properties empirically verified, not just claimed. |
 
 When you produce code that *might* violate any of these, **flag it

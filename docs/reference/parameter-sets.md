@@ -117,10 +117,12 @@ count predicted above. SHAKE-128f keygen is ≈0.76 ms and verify ≈1.05 ms.
 
     Figures above come from one Apple-Silicon machine and exist to show the
     *shape* of the trade-off between parameter sets. The project's performance
-    gate — within 2× of PQClean's portable `clean` reference — is a separate,
-    pinned measurement: 36/36 measurements pass, worst ratio 1.15×, published
-    in [`bench/README.md`](https://github.com/nandanito/slh-dsa-zig/blob/main/bench/README.md)
-    with its provenance and caveats. Quote that, not these.
+    gate — within 2× of PQClean's portable `clean` reference, both sides built
+    without hardware hash acceleration — is a separate, pinned measurement:
+    35 of 36 pass, worst ratio 2.06×, published in
+    [`bench/README.md`](https://github.com/nandanito/slh-dsa-zig/blob/main/bench/README.md)
+    with its provenance and the reasoning behind the one exceedance. Quote that,
+    not these.
 
 ## Naming
 

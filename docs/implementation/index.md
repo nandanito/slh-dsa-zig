@@ -48,7 +48,7 @@ the compiler.
 | **Zeroize secrets** | Every secret buffer scrubbed before scope exit, with volatile semantics so the compiler cannot elide it |
 | **KAT-validated** | No scheme operation is "functional" until NIST ACVP vectors pass |
 | **Fuzzed** | Every parser and attacker-facing API gets a `std.testing.fuzz` harness |
-| **Benchmarked** | Within 2× of PQClean's portable `clean` C reference — [measured](testing.md#the-measured-result), 36/36 pass, worst 1.15× |
+| **Benchmarked** | Within 2× of PQClean's portable `clean` C reference, both sides built without hardware hash acceleration — [measured](testing.md#the-measured-result), 35/36 pass, worst 2.06× |
 | **Empirically CT-verified** | ctgrind/Valgrind, not just claimed in a comment |
 
 ## Deliberate non-goals
