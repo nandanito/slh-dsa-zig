@@ -177,23 +177,44 @@ The comparison is scripted in `bench/pqclean/` and the numbers are published in
 ./bench/pqclean/table.sh < results.csv       # exits non-zero if the gate fails
 ```
 
-All 36 measurements pass, worst ratio 1.15×. But the two hash families pass for
-different reasons, and that distinction is the interesting part:
+The gate is measured **portable against portable** — both sides built without
+hardware hash acceleration, on x86-64 at `-Dcpu=x86_64_v3`. On that basis
+**35 of 36 measurements pass**, with one exceedance:
 
-| family | ratio range | why |
+| family | portable ratio | over 2× |
 |---|---|---|
-| SHAKE | 0.89×–1.15× | Genuine parity — portable Keccak on both sides |
-| SHA-2 | 0.25×–0.56× | Zig takes an ARMv8 hardware SHA-256 path; PQClean `clean` is portable C |
+| SHAKE | 0.87×–0.98× (mean 0.96×) | 0 / 18 |
+| SHA-2 | 1.73×–2.06× (mean 1.85×) | 1 / 18 — `SHA2-256s keygen` at 2.06× |
 
-Rebuild with the extensions off (`-Dcpu=apple_m3-sha2`) and the SHA-2 result
-inverts to 1.82×–2.14× — Zig's *portable* SHA-256 is about half the speed of
-PQClean's portable C. The gate passes as measured, on the target it was measured
-on; it is not a claim that it passes everywhere. Re-measuring on x86-64 is
-[issue #40](https://github.com/nandanito/slh-dsa-zig/issues/40).
+That the gate is measured this way is itself the interesting decision. Building
+Zig *with* SHA-NI makes all 36 pass at 0.33×–1.00× — Zig comes out two to three
+times faster than PQClean `clean`. But that number compares a hardware hash unit
+against portable C, and a gate you can pass with a CPU feature is a gate that
+**cannot fail for the right reason**: the SLH-DSA machinery around the hash could
+regress badly and the speedup would hide it. The accelerated numbers are
+published because they are what users get; they are not the gate.
+
+!!! tip "SHAKE is the control"
+
+    The two families differ *only* in the hash primitive — same hypertree
+    traversal, same WOTS+ chains, same FORS trees, same address handling. SHAKE
+    landing at 0.96× is therefore direct evidence that this library's SLH-DSA
+    code is at parity with PQClean's, and that the entire SHA-2 gap belongs to
+    `std.crypto`'s portable SHA-256.
+
+    That is a stronger claim than "36/36 passes", and it is why the one 2.06× is
+    recorded as a known, attributed exceedance rather than hidden behind an
+    accelerated build.
+
+One further detail: Zig's SHA-2 dispatch is a **comptime** check on target
+features, not a runtime probe — `std/crypto/sha2.zig` takes its x86-64 SHA-NI
+path only when the target has both `sha` and `avx2`. A binary built for a
+baseline target will not opportunistically use SHA-NI on a CPU that has it.
 
 The lesson generalises: a performance gate that does not name the target's
 feature set is only half-specified, and the half that is missing is the half
-that decides the answer.
+that decides the answer. The original wording said "equivalent hardware", which
+was unfalsifiable; it now names a target.
 
 ### Three measurement details worth copying
 
