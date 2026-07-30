@@ -196,15 +196,36 @@ published because they are what users get; they are not the gate.
 
 !!! tip "SHAKE is the control"
 
-    The two families differ *only* in the hash primitive — same hypertree
-    traversal, same WOTS+ chains, same FORS trees, same address handling. SHAKE
-    landing at 0.96× is therefore direct evidence that this library's SLH-DSA
-    code is at parity with PQClean's, and that the entire SHA-2 gap belongs to
-    `std.crypto`'s portable SHA-256.
+    The two families run the **same structural code**: `wots.zig`, `xmss.zig`,
+    `hypertree.zig` and `fors.zig` are generic over `hash.zig`'s `Hash(p)`, which
+    dispatches to one of two adapters in a single `switch`. Nothing above the
+    adapter branches on hash family. SHAKE landing at 0.96× is therefore direct
+    evidence that this library's SLH-DSA code is at parity with PQClean's, and
+    that the SHA-2 gap belongs to the **hash-adapter layer** — `std.crypto`'s
+    SHA-2 implementations.
 
     That is a stronger claim than "36/36 passes", and it is why the one 2.06× is
     recorded as a known, attributed exceedance rather than hidden behind an
     accelerated build.
+
+!!! warning "The adapters differ by more than the primitive"
+
+    A tempting shorthand — "the families differ only in the hash primitive" — is
+    wrong, and worth not repeating. The §11.1 and §11.2 adapters differ on three
+    axes: §11.1 hashes the expanded 32-byte address while §11.2 hashes the
+    22-byte compressed `ADRSc`; §11.2's `H_msg` adds an MGF1 layer that §11.1
+    has no equivalent of; and within §11.2 the primitive itself changes with
+    security level — `H`, `T_l` and `H_msg` are SHA-256 at `n = 16` but
+    **SHA-512** at `n = 24, 32`, with `PRF_msg` splitting the same way. Only `F`
+    and `PRF` are SHA-256 throughout.
+
+    That last axis lands on the one failing measurement: `SLH-DSA-SHA2-256s` is
+    `n = 32`, so its keygen drives `F` (SHA-256) *and* `H` (SHA-512). The
+    exceedance is `std.crypto`'s SHA-2 family, not SHA-256 specifically.
+
+    The conclusion survives — §11.2 feeds *less* data per hash call and is still
+    slower, and MGF1 runs once per operation against millions of `F`/`H` calls —
+    but the claim has to be made at adapter granularity to be true.
 
 One further detail: Zig's SHA-2 dispatch is a **comptime** check on target
 features, not a runtime probe — `std/crypto/sha2.zig` takes its x86-64 SHA-NI

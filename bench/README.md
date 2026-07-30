@@ -188,7 +188,9 @@ is kept for the accelerated numbers and because it is what surfaced the problem.
 
 **Headline: 35 of 36 gated measurements are within 2×. One exceeds it —
 `SLH-DSA-SHA2-256s keygen` at 2.06×** — and the SHAKE control below establishes
-that the excess is `std.crypto`'s SHA-256, not this library's SLH-DSA code.
+that the excess is in `std.crypto`'s hash implementations, not in this library's
+SLH-DSA code. (At `n = 32` that is SHA-512 rather than SHA-256; see the warning
+under the control.)
 
 ### x86-64 — the gated run
 
@@ -394,15 +396,41 @@ both sides — no hardware path is compiled in anywhere:
 
 | family | what differs between the two sides | portable mean |
 |---|---|---:|
-| SHAKE | Keccak-p implementation only | **0.96×** |
-| SHA-2 | SHA-256 implementation only | **1.85×** |
+| SHAKE | the §11.1 hash adapter (Keccak-p) | **0.96×** |
+| SHA-2 | the §11.2 hash adapter (SHA-256 / SHA-512 + MGF1) | **1.85×** |
 
-Everything *around* the hash is identical in both rows — the same hypertree
-traversal, the same WOTS+ chains, the same FORS trees, the same address
-handling. SHAKE landing at 0.96× is therefore direct evidence that this
-library's SLH-DSA machinery is at parity with PQClean's. The entire SHA-2
-delta is isolated to the SHA-256 primitive itself, which lives in
-`std.crypto` and which #40 explicitly scopes out of this project.
+Everything *above* the adapter is identical in both rows: `wots.zig`,
+`xmss.zig`, `hypertree.zig` and `fors.zig` are generic over `hash.zig`'s
+`Hash(p)`, which dispatches to one of the two adapters in a single `switch`.
+No structural module branches on hash family, and `Adrs.expand()` is never
+called outside `address.zig` and the SHAKE adapter. SHAKE landing at 0.96× is
+therefore direct evidence that this library's SLH-DSA machinery is at parity
+with PQClean's, and the SHA-2 delta lives in the adapter layer — which is
+`std.crypto`'s hash implementations, scoped out of this project by #40.
+
+!!! warning "Say 'adapter', not 'primitive'"
+
+    It is tempting to compress this to "the families differ only in the hash
+    primitive". That is not true, and the imprecision costs the argument:
+
+    - **ADRS encoding differs.** §11.1 hashes the expanded 32-byte address;
+      §11.2 hashes the 22-byte compressed `ADRSc`.
+    - **MGF1 exists in one family only.** §11.2's `H_msg` is MGF1 over
+      SHA-256/SHA-512; §11.1 has no MGF1 layer.
+    - **The SHA-2 primitive is not constant across security levels.** `H`,
+      `T_l` and `H_msg` use SHA-256 at `n = 16` and **SHA-512** at `n = 24, 32`;
+      `PRF_msg` is HMAC-SHA-256 or HMAC-SHA-512 on the same split. Only `F` and
+      `PRF` are always SHA-256.
+
+    The third point bears directly on the one failing measurement.
+    `SLH-DSA-SHA2-256s` is `n = 32`, so its keygen drives `F` (SHA-256) *and*
+    `H` (SHA-512). Attributing the 2.06× to "SHA-256" is wrong — it is the
+    SHA-2 family, and for this measurement mostly SHA-512.
+
+    Two of those three axes push *toward* the conclusion rather than against it:
+    §11.2 feeds **less** data per hash call (22 bytes against 32) and is still
+    slower, and MGF1 runs once per operation against the millions of `F`/`H`
+    calls that dominate a signature. The direction holds; the precision did not.
 
 That is a stronger claim than "36/36 passes," and it is the reason the single
 2.06× is recorded as a **known, attributed exceedance** rather than a project
