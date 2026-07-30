@@ -360,7 +360,10 @@ pub fn Slh_Dsa(comptime param_set: ParamSet) type {
 }
 
 // -----------------------------------------------------------------------------
-// Tests — public surface only, until bodies land.
+// Tests — surface shape, key-generation invariants, and sign/verify behaviour.
+// The authoritative correctness check is the ACVP KAT suite (`zig build kat`);
+// these cover what vectors cannot, such as entropy failure never yielding a
+// weak key.
 // -----------------------------------------------------------------------------
 
 test "Slh_Dsa exposes correct sizes for all parameter sets" {

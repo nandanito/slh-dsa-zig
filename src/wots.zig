@@ -220,7 +220,10 @@ pub fn Wots(comptime p: params_mod.Params) type {
 }
 
 // -----------------------------------------------------------------------------
-// Tests — sizes and surface area only until bodies land.
+// Tests — spec-derived properties of the chaining function plus sizes and
+// instantiation. WOTS+ has no NIST vectors of its own (ACVP publishes only at
+// scheme level), so these properties and the scheme-level KATs that exercise
+// this code are what stand in for them.
 // -----------------------------------------------------------------------------
 
 test "chain: s = 0 is the identity" {
