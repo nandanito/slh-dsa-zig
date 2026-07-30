@@ -200,11 +200,20 @@ targets is usually a *verification* story — secure boot, firmware signing — 
 signing done off-device on a build server. Design for that asymmetry rather than
 against it.
 
-**Stack, not heap.** Revisit the hash-call count you recorded in Stage 3. The
-naive recursive authentication-path computation repeatedly rebuilds shared
-subtrees. Iterative treehash algorithms exist precisely for this, and on a device
-with tens of kilobytes of RAM the difference decides whether the thing runs at
-all.
+**Trust the count over the intuition.** Revisit the hash-call count you recorded
+in Stage 3. Reading `xmss_sign`, the natural conclusion is that the `h'` sibling
+subtrees overlap and that most of the work is redundant — the sibling at height
+`h'-1` is half the tree, after all. Your instrumentation will say otherwise: the
+siblings are pairwise disjoint, so one authentication path costs `2^h' - 1`
+leaves with nothing computed twice. Iterative treehash is worth knowing as a
+control-flow technique, but do not adopt it expecting a speed-up that is not
+there. Catching that yourself, with a counter, is the habit worth taking away
+from this stage.
+
+**Stack, not heap.** Recursion depth is `h'`, so a few hundred bytes of frames —
+never the binding constraint. On a device with tens of kilobytes of RAM the
+number that decides whether the thing runs is the *signature*: 7,856 bytes at
+128s up to 49,856 at 256f, which the caller has to hold somewhere.
 
 **Choose the hash family for the silicon, not the benchmark.** Many
 microcontrollers ship a SHA-256 accelerator; almost none accelerate Keccak. That

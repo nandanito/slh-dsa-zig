@@ -39,8 +39,12 @@ pub fn Xmss(comptime p: params_mod.Params) type {
         // NOTE: This is the recursive formulation as written in the
         // standard. Recursion depth is bounded by h' (≤ 9 across all
         // parameter sets), i.e. ~2n bytes of locals per frame — fine for
-        // stack use. An iterative treehash (as used by the SPHINCS+
-        // reference implementation) is a possible later optimisation.
+        // stack use.
+        //
+        // An iterative treehash over an explicit stack would change the
+        // control flow, not the work: computing one root visits all 2^h'
+        // leaves either way, and that is already the minimum. See sign()
+        // for why the authentication path is likewise already minimal.
         // -----------------------------------------------------------------
         pub fn node(
             sk_seed: *const [n]u8,
@@ -89,10 +93,19 @@ pub fn Xmss(comptime p: params_mod.Params) type {
         ) void {
             // Authentication path (FIPS 205 §6.2 Algorithm 10 lines 1–4):
             // AUTH[j] is the sibling of the node on the leaf→root path at
-            // height j. Computed the naive way — each sibling recomputes its
-            // whole subtree via xmss_node — matching the standard's
-            // formulation; an iterative treehash is a later optimisation. The
-            // auth path is public tree material (no secret residue to scrub).
+            // height j, each computed by its own xmss_node call.
+            //
+            // Those h' subtrees are pairwise DISJOINT, so no leaf is computed
+            // twice. The sibling at height j is a child of the path node at
+            // height j+1, so it lies inside the path-node subtree at every
+            // greater height; the sibling at height j' > j is the *other*
+            // child of the path node at j'+1, so it lies outside that same
+            // subtree. Their union is every leaf except idx, making this loop
+            // exactly 2^h' - 1 leaf computations — the minimum for an
+            // authentication path. A left-to-right treehash sweep would
+            // compute 2^h', one *more*, since it also builds leaf idx.
+            //
+            // The auth path is public tree material (no secret residue to scrub).
             const auth = out_sig[Wots.signature_bytes..];
             for (0..h_prime) |j| {
                 const k = (idx >> @as(u5, @intCast(j))) ^ 1;
