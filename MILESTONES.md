@@ -244,13 +244,42 @@ surrounding SLH-DSA code would hide behind the hash speedup. Accelerated
 alongside, never gated.
 
 **The single exceedance is attributed rather than excused.**
-`SLH-DSA-SHA2-256s keygen` sits at 2.06×. SHAKE — which differs from SHA-2 only
-in the hash primitive, sharing every line of hypertree, WOTS+, FORS and address
-code — sits at 0.96× across all eighteen measurements. That control isolates
-the excess to `std.crypto`'s portable SHA-256, which #40 scopes out of this
-project. Phase gate 4 is treated as satisfied with the exception named, which
-is a stronger and more durable claim than 36/36 measured on a machine whose
-SHA-256 unit did the work.
+`SLH-DSA-SHA2-256s keygen` sits at 2.06×. SHAKE sits at 0.96× across all
+eighteen measurements, and the two families run **the same structural code** —
+`wots.zig`, `xmss.zig`, `hypertree.zig` and `fors.zig` are all generic over
+`hash.zig`'s `Hash(p)`, which dispatches to one of the two adapters in a single
+`switch`. Nothing above the adapter branches on family. So the SHAKE column
+isolates the excess to the **hash-adapter layer** rather than to this project's
+SLH-DSA machinery.
+
+That is the accurate form of the claim, and it is weaker than "differ only in
+the hash primitive" — which is what an earlier draft of this section said. The
+two adapters differ on three axes, not one:
+
+- **ADRS encoding.** §11.1 hashes the expanded 32-byte address (`Adrs.expand()`);
+  §11.2 hashes the 22-byte compressed `ADRSc`.
+- **MGF1.** §11.2's `H_msg` is MGF1 over SHA-256/SHA-512; §11.1 has no MGF1
+  layer at all.
+- **The primitive is not even constant within the SHA-2 family.** `H`, `T_l` and
+  `H_msg` use SHA-256 at `n = 16` and **SHA-512** at `n = 24, 32`; `PRF_msg` is
+  HMAC-SHA-256 or HMAC-SHA-512 on the same split. `F` and `PRF` are always
+  SHA-256.
+
+That last point matters for this specific number. `SLH-DSA-SHA2-256s` is
+`n = 32`, so its keygen drives `F` (SHA-256) *and* `H` (SHA-512). Calling the
+2.06× "`std.crypto`'s SHA-256" is wrong; it is `std.crypto`'s SHA-2 family, and
+for this measurement mostly SHA-512.
+
+The direction of the argument survives, and two of those three axes push toward
+it rather than against: §11.2 feeds *less* data per hash call (22 bytes against
+32) and still comes out slower, and MGF1 runs once per operation against the
+millions of `F`/`H` calls that dominate a signature. What did not survive was
+the precision, and the fix was to weaken the wording rather than wait for a
+reviewer to break it.
+
+Phase gate 4 is treated as satisfied with the exception named, which is a
+stronger and more durable claim than 36/36 measured on a machine whose SHA-256
+unit did the work.
 
 The comparison harness lives in `bench/pqclean/` and stays deliberately outside
 the Zig build graph, so `zig build` still needs no C toolchain.

@@ -65,7 +65,7 @@ post-quantum cryptography effort in Zig, and the direct successor to
 | SLH-DSA key generation | FIPS 205 §9.1, §10.1 | ✅ ACVP keyGen KATs pass (120/120, all 12 sets) |
 | SLH-DSA sign / verify | FIPS 205 §9.2–9.3, §10 | ✅ ACVP sigGen/sigVer KATs pass (all 12 sets, internal + external) · pre-hash deferred |
 | NIST ACVP KAT runner | — | ✅ keyGen · sigGen · sigVer modes (pre-hash groups skipped) |
-| Benchmarks vs PQClean | — | ✅ Gated portable-vs-portable on x86-64: **35/36 inside the 2× gate**, worst 2.06× (`SHA2-256s keygen`) (#10, #40) · SHAKE parity at 0.96× isolates the excess to `std.crypto`'s SHA-256, not this library · accelerated build passes 36/36, published alongside but not gated |
+| Benchmarks vs PQClean | — | ✅ Gated portable-vs-portable on x86-64: **35/36 inside the 2× gate**, worst 2.06× (`SHA2-256s keygen`) (#10, #40) · SHAKE parity at 0.96× isolates the excess to the hash-adapter layer (`std.crypto`'s SHA-2 — SHA-512 at this security level, not SHA-256), not to this library's structural code · accelerated build passes 36/36, published alongside but not gated |
 | Constant-time verification | ctgrind / valgrind | ✅ Key generation + signing verified constant-time in SK.seed/SK.prf under Valgrind, plus the WOTS+/FORS primitives in isolation (#34) · run on SHAKE/SHA2-128f + 192f, which cover every adapter code path (incl. the SHA-512 widening); other sets differ only in public tree geometry · x86-64-v3 only; AVX-512 paths open (#6) |
 | Fuzz harnesses | std.testing.fuzz | 🚧 Harnesses wired (verify, ACVP parser); cumulative nightly fuzzing accruing toward the 24h gate (#9) |
 
@@ -217,9 +217,12 @@ aspirational; they are gates each component must pass before being declared func
    accelerated build measures the CPU's hash unit rather than this library, and would
    let a regression in the surrounding SLH-DSA code hide behind it.
    Measured on x86-64: **35 of 36 pass**, worst 2.06× (`SHA2-256s keygen`). That one
-   exceedance is `std.crypto`'s portable SHA-256, not code in this repository — the
-   SHAKE sets, which differ from the SHA-2 sets only in the hash primitive, sit at
-   0.96×. See [bench/README.md](bench/README.md) for the numbers and the reasoning.
+   exceedance is in `std.crypto`'s SHA-2 implementations, not in code in this
+   repository: the SHAKE sets sit at 0.96×, and both families run the same
+   structural code — every layer above `hash.zig` is generic over the adapter. Note
+   the exceedance is a `n = 32` set, where `H` and `T_l` are **SHA-512**, so it is
+   not attributable to SHA-256 specifically. See
+   [bench/README.md](bench/README.md) for the numbers and the reasoning.
 
 See [SECURITY.md](SECURITY.md) for the responsible-disclosure policy and current limitations.
 
@@ -258,8 +261,9 @@ arrives as early as possible (see issue #7):
       AVX-512 paths are covered too is open as issue #6
 - [x] Benchmark suite + pinned PQClean comparison (issues #10, #40) — gate pinned
       to PQClean `clean`, measured portable-vs-portable on x86-64: 35/36 inside 2×,
-      worst 2.06×, with the excess attributed to `std.crypto`'s SHA-256 by the
-      SHAKE control. Accelerated (36/36) and PQClean AVX2 published alongside
+      worst 2.06×, with the excess attributed by the SHAKE control to the hash
+      adapter (`std.crypto`'s SHA-2) rather than to this library's structural
+      code. Accelerated (36/36) and PQClean AVX2 published alongside
 - [x] **First tagged release — [`v0.1.0`](https://github.com/nandanito/slh-dsa-zig/releases/tag/v0.1.0)
       (2026-07-30, experimental).** Milestone 3 closes with it; phase gates 1
       (functional), 2 (constant-time), 4 (benchmark) and 5 (documentation)
