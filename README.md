@@ -109,8 +109,13 @@ trade signature size for signing time.
 > Treat this as preview-only until status moves out of EXPERIMENTAL.
 
 ```sh
-zig fetch --save git+https://github.com/nandanito/slh-dsa-zig.git
+zig fetch --save git+https://github.com/nandanito/slh-dsa-zig.git#v0.1.1
 ```
+
+Pin the tag. Without the `#v0.1.1` suffix `zig fetch` resolves the default branch,
+which is a moving target — and because `build.zig.zon` carries a release version
+either way, the resolved dependency is labelled with a version number that need not
+correspond to any tag.
 
 Wire it into your `build.zig`:
 
@@ -264,13 +269,20 @@ arrives as early as possible (see issue #7):
       worst 2.06×, with the excess attributed by the SHAKE control to the hash
       adapter (`std.crypto`'s SHA-2) rather than to this library's structural
       code. Accelerated (36/36) and PQClean AVX2 published alongside
-- [x] **First tagged release — [`v0.1.0`](https://github.com/nandanito/slh-dsa-zig/releases/tag/v0.1.0)
-      (2026-07-30, experimental).** Milestone 3 closes with it; phase gates 1
-      (functional), 2 (constant-time), 4 (benchmark) and 5 (documentation)
-      satisfied, gate 3 (fuzz) accruing nightly. The `🚧 EXPERIMENTAL` banner
-      stays until a third-party audit — a tag is not an audit
+- [x] **First tagged release — `v0.1.0` (2026-07-30, experimental).** Milestone 3
+      closes with it; phase gates 1 (functional), 2 (constant-time), 4 (benchmark)
+      and 5 (documentation) satisfied, gate 3 (fuzz) accruing nightly. The
+      `🚧 EXPERIMENTAL` banner stays until a third-party audit — a tag is not an audit
+- [x] **[`v0.1.1`](https://github.com/nandanito/slh-dsa-zig/releases/tag/v0.1.1)
+      (2026-07-30) — use this one.** Documentation and comments only; the library
+      is behaviour-identical to `v0.1.0`. It supersedes `v0.1.0`, which shipped two
+      corrections that landed hours after that tag: a stale example header claiming
+      the scheme panics, and the benchmark attribution naming SHA-256 where the
+      failing measurement is `n = 32` and therefore SHA-512. Nine instances of the
+      latter across four files, six of them inside the published package, are fixed
+      here
 
-**Next (post-v0.1.0):** issue #38 (iterative treehash for `xmss_sign` — the most
+**Next (post-v0.1.1):** issue #38 (iterative treehash for `xmss_sign` — the most
 embedded-relevant item, and it moves the sign column on both hash families),
 issue #45 (HashSLH-DSA pre-hash variants), issue #6 (lift the ctgrind AVX-512
 pin, blocked externally on Valgrind).

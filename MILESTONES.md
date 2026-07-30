@@ -336,3 +336,33 @@ Issues: #9, #33 (fuzz), #34 (constant-time), #10 (benchmarks), #36, #39, #43
 (docs), #11 (upstream decision), #8 (closed — already complete).
 PRs: #41 (benchmarks), #42 (whole-path CT audit), #44 (study path + roadmap).
 Key commits: `c461ece`, `f9e93aa`, `3138c31`, `c0abd63`, `319b967`, `f0814a0`.
+
+---
+
+## Release note — v0.1.1 supersedes v0.1.0 (2026-07-30)
+
+Both tags landed the same day. `v0.1.1` is documentation and comments only; the
+library is behaviour-identical.
+
+`v0.1.0` was tagged at `1966991`, and two corrections landed in the hours after
+it — late enough to miss the tag, early enough that nothing depended on it yet.
+
+1. **A stale example header.** `examples/basic_sign.zig` still carried
+   "This example will `@panic` until the scheme bodies land" from the stub era.
+   `examples` is in `build.zig.zon`'s `paths`, so that shipped inside the package:
+   the most obvious first file told a new reader the library does not work.
+2. **The benchmark attribution named the wrong primitive.** Four documents said
+   the SHAKE and SHA-2 sets "differ only in the hash primitive" and pinned the one
+   over-gate measurement on `std.crypto`'s SHA-256. The adapters differ on three
+   axes, and `SLH-DSA-SHA2-256s` is `n = 32`, where `H` and `T_l` are **SHA-512**.
+   Nine instances across four files — six of them inside the published package
+   (`README.md` ×3, `bench/README.md` ×3).
+
+The second is why this became a release rather than an erratum. An erratum is the
+right instrument for a defect you cannot fix; this was one tag command. Publishing
+a correction everywhere else while leaving it standing in the artifact those
+corrections describe would have been the worse of the two options — and the cost
+of re-pointing users only ever rises from here.
+
+`v0.1.0` stays published and marked superseded. It is the honest record of what
+was tagged.
