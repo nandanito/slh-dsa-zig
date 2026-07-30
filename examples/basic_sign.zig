@@ -5,9 +5,11 @@
 //!
 //!   zig build example_basic_sign
 //!
-//! > 🚧 **This example will @panic until the scheme bodies land.** It is
-//! > here to lock down the public API surface and document the intended
-//! > calling convention for downstream users.
+//! Performs a real key generation, signature, verification, and tamper
+//! check — nothing here is mocked. SLH-DSA-SHAKE-128s is a small-signature,
+//! slow-signing parameter set, so expect the run to take a few seconds; the
+//! `f` variants trade signature size for speed if you only want to watch the
+//! API work.
 //!
 //! Lane: Lane A (documentation / example).
 
