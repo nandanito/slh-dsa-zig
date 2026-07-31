@@ -29,7 +29,6 @@ pub const Error = error{
     InvalidInput,       // wrong length or malformed
     IoError,            // RNG failure
     ContextTooLong,     // ctx > 255 bytes (FIPS 205 §10.2)
-    NotImplemented,
 };
 ```
 
