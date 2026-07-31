@@ -146,6 +146,9 @@ pub fn Fors(comptime p: params_mod.Params) type {
                 skGen(sk_seed, pk_seed, adrs, leaf, out_sig[base..][0..n]);
 
                 // Auth path: the sibling node at each height j of tree i.
+                // As in xmss.sign, these a subtrees are pairwise disjoint, so
+                // tree i costs 2^a - 1 leaf computations with none repeated —
+                // an iterative treehash sweep would cost 2^a, one more.
                 for (0..a) |j| {
                     const s = (indices[i] >> @as(u5, @intCast(j))) ^ 1;
                     const sib = tree * (two_pow_a >> @as(u5, @intCast(j))) + s;

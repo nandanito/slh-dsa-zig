@@ -63,11 +63,12 @@ The implementation is literally recursive, matching the standard's formulation.
 Recursion depth is bounded by `h' ≤ 9` across all twelve parameter sets, so stack
 use is a few hundred bytes — no concern even on constrained targets.
 
-The reference SPHINCS+ implementation instead uses an **iterative treehash**: walk
-leaves left to right, push each onto a stack, and merge whenever the top two nodes
-are at the same height. The advantage is not memory but *work sharing* — see the
-note under `sign` below. Adopting it is an open optimisation avenue, tracked with
-the [benchmark work](../implementation/testing.md#benchmarks).
+An **iterative treehash** — walk leaves left to right, push each onto a stack, and
+merge whenever the top two nodes sit at the same height — is the shape the
+SPHINCS+ reference implementation uses. For computing a *root* it changes the
+control flow but not the work: `node(0, h')` visits all `2^h'` leaves either way,
+which is the minimum. For the *authentication path* it is a marginal loss rather
+than a win; see the note under `sign` below.
 
 ## `sign` — §6.2, Algorithm 10
 
@@ -87,20 +88,48 @@ Wots.sign(msg, sk_seed, pk_seed, adrs, out_sig[0..Wots.signature_bytes]);
 index at height `j`, then flip the low bit to get its sibling. That one expression
 is the whole authentication path computation.
 
-!!! warning "This is the naive `O(2^h')` path, deliberately"
+!!! note "This loop is already minimal — no leaf is computed twice"
 
-    Each of the `h'` siblings is computed by a fresh `node` call, which rebuilds
-    that sibling's **entire subtree** from scratch. The subtree at height `h'-1`
-    alone is half the tree. Summed over all heights, `sign` computes roughly the
-    whole tree's worth of leaves — and it recomputes leaves that earlier siblings
-    already visited.
+    Each of the `h'` siblings gets its own `node` call, and each of those does
+    rebuild that sibling's entire subtree — the one at height `h'-1` is half the
+    tree. It is tempting to conclude that the subtrees overlap heavily and that
+    `sign` therefore throws away most of its work. **They do not overlap.**
 
-    An iterative treehash computes each leaf **once** and harvests all `h'`
-    authentication nodes in a single left-to-right sweep, which is close to a 2×
-    saving on the dominant cost of signing. This library takes the naive route
-    because it matches the standard line for line and is much easier to argue
-    correct; the optimisation is a known, measured-later improvement rather than
-    an oversight.
+    The sibling at height `j` is a child of the path node at height `j+1`, so it
+    lies *inside* the path-node subtree at every greater height. The sibling at
+    height `j' > j` is the *other* child of the path node at `j'+1`, so it lies
+    *outside* that same subtree. Every pair is disjoint, and their union is
+    exactly the leaves other than `idx`.
+
+    Measured rather than argued — instrumenting both `Wots.pkGen` and the node
+    hash inside `Xmss.node`, then signing across each tree height:
+
+    | `h'` | this loop | a full treehash sweep | recomputed |
+    |---|---|---|---|
+    | 3 | 7 leaves + 4 node hashes | 8 leaves + 7 node hashes | 0 |
+    | 4 | 15 leaves + 11 node hashes | 16 leaves + 15 node hashes | 0 |
+    | 8 | 255 leaves + 247 node hashes | 256 leaves + 255 node hashes | 0 |
+    | 9 | 511 leaves + 502 node hashes | 512 leaves + 511 node hashes | 0 |
+
+    The sweep costs **one leaf and `h'` node hashes more**, because it also
+    builds leaf `idx` and the `h'` path nodes — none of which the authentication
+    path needs. An iterative formulation that skips the `idx` subtree computes
+    exactly the set this loop does, so it ties at best. There is no work here to
+    reclaim.
+
+!!! tip "Why the reference implementation uses a sweep anyway"
+
+    A sweep hands back the tree **root** for free, and `ht_sign` needs each
+    layer's root as the message the layer above signs. That is the reason to
+    prefer it — not work sharing.
+
+    This library gets the root a cheaper way. `Wots.sign` runs each chain from
+    `0` to `msg_digits[i]`; `Wots.pkFromSig` continues the *same* chains from
+    `msg_digits[i]` to `w-1`. Together they perform exactly one `wots_pkGen`
+    worth of chain steps, split, with no overlap — so
+    [`Hypertree.sign`](hypertree.md) recovers the root by finishing chains it
+    had already started, rather than paying for a whole extra leaf the way a
+    sweep does.
 
 **`setType` after the loop.** The auth-path loop leaves the address configured for
 tree nodes; the WOTS+ signature needs `.wots_hash` and the leaf's key-pair

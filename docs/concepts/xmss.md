@@ -62,9 +62,10 @@ recursive case is ordinary Merkle hashing.
     `h' ≤ 9` across all parameter sets, so a handful of `n`-byte locals per frame.
     The SPHINCS+ reference implementation instead uses an iterative *treehash*
     that computes leaves left to right and merges completed subtrees with an
-    explicit stack, which avoids recomputing shared subtrees when several nodes
-    are needed. That is a known optimisation avenue here, not something already
-    done — see [the component page](../components/xmss.md#performance-note).
+    explicit stack. That is a control-flow difference, not a work saving: one
+    root costs `2^h'` leaf computations either way. The cost centre is real — it
+    is simply not *redundant* work, here or in `xmss_sign` — see
+    [the component page](../components/xmss.md#performance-note).
 
 ### `xmss_pkFromSig` — verification by reconstruction
 
