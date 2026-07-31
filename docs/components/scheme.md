@@ -26,16 +26,21 @@ strings, so serialisation is a copy and there is no format to get wrong.
 ```zig
 pub const Error = error{
     InvalidSignature,   // did not verify
-    InvalidInput,       // wrong length or malformed
     IoError,            // RNG failure
     ContextTooLong,     // ctx > 255 bytes (FIPS 205 §10.2)
 };
 ```
 
+Every variant is reachable. There is deliberately no generic "malformed input"
+error: keys and signatures are fixed-size array pointers, so a wrong length is a
+compile-time error rather than a runtime one (see [Verification](#verification)
+below). The only caller mistake that survives to run time is an over-long context
+string.
+
 `ContextTooLong` deliberately matches `std.crypto.errors.ContextTooLongError`
-rather than folding into `InvalidInput`. Using the canonical name means callers
-can handle it uniformly across `std.crypto` algorithms — it is the same condition
-ML-DSA reports.
+rather than folding into a generic input error. Using the canonical name means
+callers can handle it uniformly across `std.crypto` algorithms — it is the same
+condition ML-DSA reports.
 
 ## Digest parsing
 
@@ -248,8 +253,9 @@ fn verifyCore(sig, msg_parts, pk) Error!void {
 
 Signature length is a **type invariant** — `sig: *const Signature` is a
 `[signature_length]u8` pointer, so a wrong-length signature cannot be passed. That
-removes a whole class of length-confusion bug at the type level, and it is why
-`InvalidInput` never appears on this path.
+removes a whole class of length-confusion bug at the type level, and it is why the
+error set carries no generic malformed-input variant: on this path there is no
+runtime length left to get wrong.
 
 There is exactly one accept condition: `Hypertree.verify` returning true.
 
