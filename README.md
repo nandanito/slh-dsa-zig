@@ -282,10 +282,15 @@ arrives as early as possible (see issue #7):
       latter across four files, six of them inside the published package, are fixed
       here
 
-**Next (post-v0.1.1):** issue #38 (iterative treehash for `xmss_sign` — the most
-embedded-relevant item, and it moves the sign column on both hash families),
-issue #45 (HashSLH-DSA pre-hash variants), issue #6 (lift the ctgrind AVX-512
-pin, blocked externally on Valgrind).
+**Next (post-v0.1.1):** issue #45 (HashSLH-DSA pre-hash variants, part of the
+`0.2.0` API surface) and issue #6 (lift the ctgrind AVX-512 pin, blocked
+externally on Valgrind).
+
+Issue #38 proposed an iterative treehash for `xmss_sign` on the premise that the
+authentication path recomputes shared subtrees. It does not: the `h'` sibling
+subtrees are pairwise disjoint, so the existing recursion already computes each
+leaf exactly once — see
+[the XMSS component page](https://nandan.me/slh-dsa-zig/components/xmss/#performance-note).
 
 Documentation is tracked separately: the learning-oriented
 [documentation site](https://nandan.me/slh-dsa-zig/) (issue #36) covers the

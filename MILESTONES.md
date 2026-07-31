@@ -323,9 +323,12 @@ banner stays up — it comes down for a third-party audit, not for a green CI ru
 
 ### Deferred / follow-ups
 
-- **#38** — iterative treehash for `xmss_sign`; the auth path recomputes shared
-  subtrees. The most embedded-relevant open item, and the one that would move
-  the sign column on both families.
+- **#38** — iterative treehash for `xmss_sign`, filed on the premise that the
+  auth path recomputes shared subtrees. **Investigated and refuted:** the `h'`
+  sibling subtrees are pairwise disjoint, so the existing recursion already
+  computes each leaf exactly once and does `h'` *fewer* node hashes than a
+  treehash sweep would. No optimisation available; the docs that repeated the
+  claim were corrected instead.
 - **#6** — lift the ctgrind `x86-64-v3` pin once Valgrind can decode AVX-512.
   Externally blocked.
 - **#45** — HashSLH-DSA pre-hash variants.

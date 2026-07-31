@@ -100,10 +100,15 @@ pub fn Xmss(comptime p: params_mod.Params) type {
             // height j+1, so it lies inside the path-node subtree at every
             // greater height; the sibling at height j' > j is the *other*
             // child of the path node at j'+1, so it lies outside that same
-            // subtree. Their union is every leaf except idx, making this loop
-            // exactly 2^h' - 1 leaf computations — the minimum for an
-            // authentication path. A left-to-right treehash sweep would
-            // compute 2^h', one *more*, since it also builds leaf idx.
+            // subtree. Their union is every leaf except idx, so this loop
+            // costs exactly 2^h' - 1 leaves and 2^h' - 1 - h' node hashes.
+            //
+            // A full left-to-right treehash sweep costs 2^h' leaves and
+            // 2^h' - 1 node hashes — one leaf and h' hashes MORE, because it
+            // also builds leaf idx and the h' path nodes, none of which the
+            // authentication path needs. An iterative formulation that skips
+            // the idx subtree computes exactly the set this loop does, so it
+            // ties at best. There is no work here to reclaim.
             //
             // The auth path is public tree material (no secret residue to scrub).
             const auth = out_sig[Wots.signature_bytes..];
