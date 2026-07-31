@@ -37,8 +37,6 @@ pub const ParamSet = params_mod.ParamSet;
 pub const Error = error{
     /// The signature did not verify against the message and public key.
     InvalidSignature,
-    /// Input data was the wrong length or otherwise malformed.
-    InvalidInput,
     /// Caller-side I/O error (RNG exhausted, etc.). Specific causes are
     /// surfaced by the underlying `std.Io`.
     IoError,
