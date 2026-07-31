@@ -45,8 +45,6 @@ pub const Error = error{
     /// The context string exceeded 255 bytes (FIPS 205 §10.2). Uses the
     /// canonical `std.crypto` error name (`std.crypto.errors.ContextTooLongError`).
     ContextTooLong,
-    /// Skeleton-only: function body has not been implemented yet.
-    NotImplemented,
 };
 
 /// Build the SLH-DSA namespace for a parameter set.
