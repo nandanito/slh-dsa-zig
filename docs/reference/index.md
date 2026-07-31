@@ -39,7 +39,7 @@ Lookup material.
 | Winternitz `w` | 16 (`lg_w = 4`) for every set |
 | Signature budget | up to `2^64` per key |
 | Stateful? | **No** — that is the `SL` in SLH-DSA |
-| Pre-hash variants | Defined by FIPS 205; **deferred** in this library |
+| Pre-hash variants | HashSLH-DSA, 12 approved functions (FIPS 205 §10.2.2) |
 
 ## Commands
 

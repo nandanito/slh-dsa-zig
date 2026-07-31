@@ -149,14 +149,34 @@ The **internal** interface (§9.2/§9.3, `signInternal`/`verifyInternal`) signs 
 with no prefix at all. It exists because ACVP tests both interfaces separately;
 application code should use the external one.
 
-!!! info "HashSLH-DSA is deferred in this library"
+### The pre-hash interface
 
-    FIPS 205 also defines pre-hash variants (`hash_slh_sign`/`hash_slh_verify`,
-    separator `0x01` plus a hash OID) that sign `PH(M)` instead of `M`. This
-    library implements only the pure variant, as a recorded decision rather than
-    an oversight: `std.crypto` ships ML-DSA without HashML-DSA, ACVP certifies
-    pre-hash as a separate group, and adding it later is additive and
-    non-breaking. See ARCHITECTURE.md.
+FIPS 205 also defines **pre-hash** variants (`hash_slh_sign` / `hash_slh_verify`,
+§10.2.2 Algorithm 23 and §10.3 Algorithm 25), exposed here as `signPreHash` /
+`verifyPreHash`. They sign a digest of the content instead of the content:
+
+```
+M' = toByte(1,1) ‖ toByte(|ctx|,1) ‖ ctx ‖ OID ‖ PH_M
+```
+
+Two things change relative to the pure external interface. The separator is
+`0x01` rather than `0x00`, so the same bytes can never be read as both. And an
+`OID` — the DER encoding of the pre-hash function's identifier — is signed
+alongside the digest, which is what binds the *choice* of hash into the
+signature. Without it, a 32-byte digest would be just 32 bytes, and a signature
+made over a SHA2-256 digest could be presented as one over a SHA3-256 digest.
+
+The verifier must be told which function was used; it is not recoverable from
+the signature. Supplying the wrong one produces a different `M'` and therefore
+`error.InvalidSignature`.
+
+!!! question "Why sign a digest at all?"
+
+    Because sometimes the signer cannot see the whole message. A protocol may
+    have only a digest to hand, or the content may be too large to stream
+    through the signing module twice. FIPS 205 §10.2.2 notes that in that case
+    the hash must still be computed inside a FIPS 140-validated module — though
+    not necessarily the *same* one that runs `slh_sign_internal`.
 
 ## The complete picture
 

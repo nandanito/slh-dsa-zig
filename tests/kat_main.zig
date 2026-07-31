@@ -163,16 +163,15 @@ pub fn runVectors(
         }
 
         // Signature modes carry two extra group-level axes: the signature
-        // interface (internal vs external) and the pre-hash mode. HashSLH-DSA
-        // pre-hash groups are out of scope (issue #8) and skipped wholesale;
-        // pure/none groups run against the internal or external signer.
+        // interface (internal vs external) and the pre-hash mode. They are
+        // orthogonal — every HashSLH-DSA group is also an `external` group —
+        // so both are read, and the pre-hash function itself comes from a
+        // per-test field below (FIPS 205 §10.2.2).
         var interface: runner.Interface = .internal;
+        var group_is_pre_hash = false;
         if (mode == .sig_gen or mode == .sig_ver) {
             const pre_hash = try runner.asString(try runner.getField(gobj, "preHash"));
-            if (std.mem.eql(u8, pre_hash, "preHash")) {
-                summary.skipped += @intCast(tests.items.len);
-                continue;
-            }
+            group_is_pre_hash = std.mem.eql(u8, pre_hash, "preHash");
             const iface_name = try runner.asString(try runner.getField(gobj, "signatureInterface"));
             interface = runner.Interface.fromString(iface_name) orelse {
                 std.debug.print("warning: unknown signatureInterface '{s}', skipping group\n", .{iface_name});
@@ -184,6 +183,20 @@ pub fn runVectors(
         for (tests.items) |tc| {
             const tobj = try runner.asObject(tc);
             const tc_id = try runner.asTcId(try runner.getField(tobj, "tcId"));
+
+            // `hashAlg` is a per-test field, not a group-level one: ACVP varies
+            // the pre-hash function within a single group. Pure and internal
+            // groups carry `hashAlg: "none"`, so the group's `preHash` axis —
+            // not the presence of the field — decides whether it is read.
+            var pre_hash: ?runner.PreHash = null;
+            if (group_is_pre_hash) {
+                const alg_name = try runner.asString(try runner.getField(tobj, "hashAlg"));
+                pre_hash = runner.parsePreHash(alg_name) orelse {
+                    std.debug.print("warning: unknown hashAlg '{s}' (tcId={d}), skipping\n", .{ alg_name, tc_id });
+                    summary.skipped += 1;
+                    continue;
+                };
+            }
 
             const result: runner.VectorResult = switch (mode) {
                 .key_gen => try runner.runKeyGen(allocator, .{
@@ -203,6 +216,7 @@ pub fn runVectors(
                     .msg = try runner.hexDecode(allocator, try runner.asString(try runner.getField(tobj, "message"))),
                     .ctx = try optContext(allocator, tobj, interface),
                     .opt_rand = try optHex(allocator, tobj, "additionalRandomness"),
+                    .pre_hash = pre_hash,
                     .expected_sig = try runner.hexDecode(allocator, try runner.asString(try runner.getField(tobj, "signature"))),
                 }),
                 .sig_ver => try runner.runSigVer(allocator, .{
@@ -213,6 +227,7 @@ pub fn runVectors(
                     .msg = try runner.hexDecode(allocator, try runner.asString(try runner.getField(tobj, "message"))),
                     .ctx = try optContext(allocator, tobj, interface),
                     .sig = try runner.hexDecode(allocator, try runner.asString(try runner.getField(tobj, "signature"))),
+                    .pre_hash = pre_hash,
                     .expected_accept = try runner.asBool(try runner.getField(tobj, "testPassed")),
                 }),
             };
@@ -250,8 +265,9 @@ pub fn main(init: std.process.Init) !u8 {
     // -----------------------------------------------------------------
     // Load and dispatch.
     //
-    // keyGen, sigGen, and sigVer are all wired. HashSLH-DSA pre-hash groups
-    // (issue #8) are skipped by the walker and reported under `skipped`.
+    // keyGen, sigGen, and sigVer are all wired, including the HashSLH-DSA
+    // pre-hash groups (FIPS 205 §10.2.2 / §10.3). Nothing is skipped by
+    // design; `skipped` now only counts genuinely unrecognised input.
     // -----------------------------------------------------------------
 
     var parsed = runner.loadVectorsFromFile(init.io, allocator, cli.vectors_path.?) catch |err| {

@@ -221,6 +221,9 @@ src/              ← Lane A library. Crypto primitives, top-level scheme.
   xmss.zig        ← FIPS 205 §6 (XMSS).
   hypertree.zig   ← FIPS 205 §7 (hypertree).
   fors.zig        ← FIPS 205 §8 (FORS).
+  prehash.zig     ← FIPS 205 §10.2.2 pre-hash functions (HashSLH-DSA): the
+                    12 approved hashes, their DER OIDs, and PH_M. Assembling
+                    M' stays in slh_dsa.zig.
 
 tests/            ← Lane A test infrastructure (KAT runner + main).
   kat_runner.zig  ← ACVP JSON parser + dispatcher.

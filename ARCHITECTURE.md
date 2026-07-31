@@ -19,6 +19,8 @@ FIPS 205 §6    — XMSS                           src/xmss.zig
 FIPS 205 §7    — Hypertree                      src/hypertree.zig
 FIPS 205 §8    — FORS                           src/fors.zig
 FIPS 205 §9    — SLH-DSA (top-level scheme)     src/slh_dsa.zig
+FIPS 205 §10   — External interfaces            src/slh_dsa.zig
+FIPS 205 §10.2.2 — Pre-hash functions (PH)      src/prehash.zig
 FIPS 205 §11   — Parameter sets                 src/params.zig
 FIPS 205 §11.1 — Hash functions (SHAKE)         src/hash_shake.zig
 FIPS 205 §11.2 — Hash functions (SHA-2)         src/hash_sha2.zig
@@ -103,11 +105,25 @@ To keep signing allocation-free for arbitrary-length messages, the `PRF_msg` / `
 adapters absorb the message as an ordered sequence of parts, so the context prefix is
 prepended without copying `M`.
 
-**HashSLH-DSA is deferred.** The pre-hash variants `hash_slh_sign` / `hash_slh_verify`
-(FIPS 205 §10.2/§10.3 — domain separator `0x01` plus a per-hash OID over `PH(M)`) are a
-deliberate future addition, not an omission (issue #8): `std.crypto` ships ML-DSA without
-HashML-DSA, ACVP certifies pre-hash as a separate group, and adding it later is additive and
-non-breaking. Until then this library implements only the pure variant.
+**HashSLH-DSA is implemented.** The pre-hash variants `hash_slh_sign` / `hash_slh_verify`
+(FIPS 205 §10.2.2 Algorithm 23 / §10.3 Algorithm 25) are exposed as `signPreHash` /
+`verifyPreHash`. They sign a digest of the content rather than the content itself:
+
+```
+M' = toByte(1,1) ‖ toByte(|ctx|,1) ‖ ctx ‖ OID ‖ PH_M
+```
+
+The `0x01` domain separator distinguishes this from the pure external signer's `0x00`, and
+`OID` — the DER encoding of the pre-hash function's identifier — is signed alongside the
+digest, so a digest produced under one function cannot be replayed as another's. The twelve
+approved functions live in `src/prehash.zig`, which supplies only the OID encoding and
+`PH_M`; assembling `M'` stays in `slh_dsa.zig` and reuses the same part-wise absorption the
+pure path uses, so pre-hashing copies neither the message nor the context.
+
+This was deferred through `0.1.x` (issue #8, then #45) on the grounds that `std.crypto`
+ships ML-DSA without HashML-DSA. It landed for `0.2.0` because the argument was one about
+upstream parity — which governs the Lane B tree, not this library — while the 456 ACVP
+pre-hash vectors it unlocks are direct evidence of correctness that was going unused.
 
 ## The comptime parameterisation pattern
 

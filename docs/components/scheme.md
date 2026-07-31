@@ -214,6 +214,29 @@ pub fn signInternal(out_sig, msg, sk, opt_rand) void {
 These exist because ACVP tests both interfaces separately. Application code should
 use the external one.
 
+**Pre-hash** (§10.2.2 Alg 23 / §10.3 Alg 25) — separator `0x01`, and the pre-hash
+function's DER OID signed alongside the digest:
+
+```zig
+pub fn signPreHash(out_sig, msg, ctx, ph: PreHash, sk, opt_rand) Error!void {
+    if (ctx.len > 255) return Error.ContextTooLong;
+    const prefix = [2]u8{ 0x01, @intCast(ctx.len) };
+    const oid = ph.oid();
+    var digest_buf: [prehash.max_digest_length]u8 = undefined;
+    const ph_m = ph.hash(msg, &digest_buf);
+    signCore(out_sig, &[_][]const u8{ &prefix, ctx, &oid, ph_m }, sk, opt_rand);
+}
+```
+
+Note what this does *not* do: the message is never copied. `msg_parts` is already
+`[]const []const u8`, so the digest slots in as a fourth part exactly the way the
+context prefix slots in as a first. The digest buffer is a fixed 64 bytes — the
+largest approved digest — on the stack.
+
+The pre-hash function is a **runtime** enum, not a comptime parameter. Protocols
+generally learn which hash to use from wire data, and a twelve-way branch is
+noise next to hashing the message and then running SLH-DSA over the result.
+
 !!! note "Domain separation is negatively tested"
 
     The test suite asserts that a pure signature (`0x00 ‖ 0x00`-prefixed) does
@@ -223,6 +246,11 @@ use the external one.
 
     Likewise: a signature under `ctx = "a"` must not verify under `ctx = "b"` or
     under `ctx = ""`.
+
+    And for pre-hash, a signature made under `.sha2_256` must not verify under
+    `.sha3_256` or `.sha2_512_256`. Those three are chosen deliberately: all
+    produce 32-byte digests, so digest *length* cannot be what separates them.
+    What separates them is the OID inside `M'`.
 
 `signInternal` and `verifyInternal` return `void`/`Error!void` with no
 `ContextTooLong` case, since there is no context to be too long.

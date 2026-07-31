@@ -82,8 +82,8 @@ https://raw.githubusercontent.com/usnistgov/ACVP-Server/112690e8484dba7077709a05
 **Bumping the pin** (deliberate, not automatic): pick the new commit, update
 `ACVP_COMMIT` in `ci.yml` and the value above, re-fetch locally, and re-run all
 three modes to confirm the implementation still matches before merging. The
-pinned corpus currently passes keyGen 120/120, sigGen 336/336, sigVer 336/336
-(pre-hash groups skipped — see below).
+pinned corpus currently passes keyGen 120/120, sigGen 624/624, sigVer 504/504,
+with nothing skipped.
 
 ## Running the runner
 
@@ -137,7 +137,7 @@ Test **groups** carry the signing configuration:
 |----------------------|---------------------------------|-----------------------------------------------------|
 | `signatureInterface` | `internal` / `external`         | `signInternal` (M direct) vs `signWithContext`      |
 | `deterministic`      | `true` / `false`                | `opt_rand` = PK.seed (null) vs `additionalRandomness` |
-| `preHash`            | `none` / `pure` / `preHash`     | `preHash` groups are **skipped** (see below)        |
+| `preHash`            | `none` / `pure` / `preHash`     | `preHash` selects `signPreHash` (see below)         |
 
 Per **test**:
 
@@ -156,7 +156,7 @@ The runner signs and compares byte-for-byte against `signature`.
 | Group field          | Values                      | Effect                                    |
 |----------------------|-----------------------------|-------------------------------------------|
 | `signatureInterface` | `internal` / `external`     | `verifyInternal` vs `verifyWithContext`   |
-| `preHash`            | `none` / `pure` / `preHash` | `preHash` groups are **skipped**          |
+| `preHash`            | `none` / `pure` / `preHash` | `preHash` selects `verifyPreHash`         |
 
 Per **test**:
 
@@ -172,17 +172,33 @@ Negative cases include wrong-length signatures ("too large" / "too small");
 a length mismatch cannot form the fixed-size signature array and is scored
 as a rejection, matching `testPassed: false`.
 
-## HashSLH-DSA (pre-hash) is out of scope
+## HashSLH-DSA (pre-hash) groups
 
 Both sigGen and sigVer include `preHash: "preHash"` groups exercising the
-HashSLH-DSA pre-hash variant (a `hashAlg` is applied to the message before
-signing, FIPS 205 §10.2/§10.3). That variant is **deferred** (issue #8), so
-the runner skips those groups and reports them under `skipped`. The pure
-SLH-DSA groups — `preHash: "pure"` (external) and `preHash: "none"`
-(internal) — are the ones in scope.
+HashSLH-DSA pre-hash variant, where a `hashAlg` is applied to the message
+before signing (FIPS 205 §10.2.2 Algorithm 23 / §10.3 Algorithm 25). These
+run against `signPreHash` / `verifyPreHash`.
+
+Two details of the vector format matter for the runner:
+
+- **`preHash` is a group-level axis; `hashAlg` is a per-test field.** ACVP
+  varies the pre-hash function *within* a single group, so the function has to
+  be read per test case, not per group.
+- **Every test carries `hashAlg`, including pure ones**, where its value is
+  `"none"`. So the presence of the field says nothing — the group's `preHash`
+  value is what decides whether a pre-hash function applies.
+
+Pre-hash groups are always `signatureInterface: "external"`; the two axes are
+orthogonal in the schema but only one combination occurs.
+
+The twelve `hashAlg` names in use are `SHA2-224`, `SHA2-256`, `SHA2-384`,
+`SHA2-512`, `SHA2-512/224`, `SHA2-512/256`, `SHA3-224`, `SHA3-256`, `SHA3-384`,
+`SHA3-512`, `SHAKE-128`, and `SHAKE-256`. Note that ACVP hyphenates the XOF
+names, unlike FIPS 205's `SHAKE128` / `SHAKE256`.
 
 ## Status
 
-`keyGen`, `sigGen`, and `sigVer` modes are fully wired (issue #25). Against
-the ACVP sample vectors, all three pass across the 12 parameter sets for the
-internal and external interfaces; the pre-hash groups are skipped as noted.
+`keyGen`, `sigGen`, and `sigVer` modes are fully wired (issues #25, #45).
+Against the ACVP sample vectors, all three pass across the 12 parameter sets
+for all three signature interfaces — internal, external (pure), and pre-hash.
+No group is skipped by design.
