@@ -157,19 +157,29 @@ jobs:
       # `timeout`'s exit code and could otherwise mask a compile failure.
       #
       # `fuzz-<slug>` is filtered to exactly one harness, which is what makes
-      # this job's wall-clock equal to that target's fuzz time. The smoke
-      # therefore reports `1 passed`; if a filter ever stops matching, Zig
-      # reports zero tests rather than erroring, so assert the count.
+      # this job's wall-clock equal to that target's fuzz time.
+      #
+      # A filter that matches NOTHING is silent: verified against Zig 0.16.0,
+      # `zig build fuzz-<slug>` with a non-matching filter prints
+      # "Build Summary: 3/3 steps succeeded" / "run test success" and exits 0.
+      # The target would then bank a full window having executed no harness at
+      # all — the same shape of lie as #68. So assert the count positively.
+      # Any of these three forms proves one test ran, and none of them appears
+      # in the zero-match output:
+      #   "1/1 tests passed"   — build summary
+      #   "1 pass (1 total)"   — per-step line under --summary all
+      #   "All 1 tests passed" — runner terminal output
       - name: Build & smoke-run fuzz target
         shell: bash
         run: |
           set -euo pipefail
           out=$(zig build fuzz-${{ matrix.target.slug }} --summary all 2>&1)
           echo "$out"
-          if ! grep -qE '1 passed|1 pass \(1 total\)' <<<"$out"; then
+          if ! grep -qE '1/1 tests passed|1 pass \(1 total\)|All 1 tests passed' <<<"$out"; then
             echo "::error::expected exactly one harness for"
-            echo "::error::'${{ matrix.target.slug }}'. The build.zig filter no longer"
-            echo "::error::matches exactly one test — per-target accounting is wrong."
+            echo "::error::'${{ matrix.target.slug }}' and could not confirm one ran. The"
+            echo "::error::build.zig filter probably no longer matches exactly one test,"
+            echo "::error::which silently exits 0 — per-target accounting would be wrong."
             exit 1
           fi
 
