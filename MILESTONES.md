@@ -458,3 +458,57 @@ not interchangeable with the pure path's `0x00` in either direction.
 
 Issues: #45 (both halves), #8 (closed — the original deferral), #11 (upstream).
 PRs: #59 (`NotImplemented`), #60 (`InvalidInput`), #61 (HashSLH-DSA).
+
+---
+
+## Release — v0.2.0 (2026-08-01)
+
+The first release that changes behaviour since `v0.1.0`. Four commits since the
+`v0.1.1` tag (`439c180`):
+
+| Commit | PR | What |
+|---|---|---|
+| `d4a1b8a` | #58 | docs: the auth-path siblings are disjoint — corrects the #38 treehash claim |
+| `90c429e` | #59 | api: drop the dead `NotImplemented` error variant ⚠️ |
+| `6b30284` | #60 | api: drop the unreachable `InvalidInput` error variant ⚠️ |
+| `58084cc` | #61 | api: HashSLH-DSA pre-hash variants (FIPS 205 §10.2.2 / §10.3) |
+
+### ⚠️ Breaking
+
+Two variants were removed from the public `slh_dsa.Error` set:
+
+```zig
+pub const Error = error{
+    InvalidSignature,
+    IoError,
+    ContextTooLong,
+};
+```
+
+Downstream code that switches exhaustively over `slh_dsa.Error` without an
+`else` must drop the `NotImplemented` and `InvalidInput` cases. Neither was ever
+returned, so **no runtime behaviour changes** — this breaks compilation, not
+programs.
+
+`0.2.0` rather than `0.1.2` because a patch release means "drop-in safe", and
+this is not. The version number is the only signal a reader gets; Zig's package
+manager pins by hash and would not have caught it for them.
+
+### Added
+
+`signPreHash`, `verifyPreHash`, and `slh_dsa.PreHash` — purely additive. With
+them, all three FIPS 205 signature interfaces are implemented, and no ACVP group
+is skipped by design any more:
+
+| Mode   | v0.1.1                   | v0.2.0                 |
+|--------|--------------------------|------------------------|
+| keyGen | 120/120                  | **120/120**            |
+| sigGen | 336/336, **288 skipped** | **624/624**, 0 skipped |
+| sigVer | 336/336, **168 skipped** | **504/504**, 0 skipped |
+
+### Unchanged
+
+The `🚧 EXPERIMENTAL` banner. This release completes an interface; it is not an
+audit. Phase gates 1, 2, 4 and 5 remain satisfied and gate 3 (cumulative
+fuzzing) continues to accrue nightly — `verifyPreHash` was added to the fuzz
+harnesses on both hash families, so the new surface accrues alongside the rest.

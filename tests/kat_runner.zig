@@ -281,8 +281,9 @@ pub fn loadVectorsFromFile(
 // -----------------------------------------------------------------------------
 // Per-mode executors. Each takes a vector struct and produces a VectorResult.
 //
-// These are SKELETON and will be filled in alongside the corresponding
-// scheme implementation. Until then they return a "skipped" result.
+// All three are implemented and drive the real scheme; none returns a
+// "skipped" result of its own. `skipped` in the summary is accounted for by
+// the walker in `kat_main.zig`, and only for input it cannot recognise.
 // -----------------------------------------------------------------------------
 
 pub fn runKeyGen(

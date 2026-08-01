@@ -113,10 +113,10 @@ trade signature size for signing time.
 > Treat this as preview-only until status moves out of EXPERIMENTAL.
 
 ```sh
-zig fetch --save git+https://github.com/nandanito/slh-dsa-zig.git#v0.1.1
+zig fetch --save git+https://github.com/nandanito/slh-dsa-zig.git#v0.2.0
 ```
 
-Pin the tag. Without the `#v0.1.1` suffix `zig fetch` resolves the default branch,
+Pin the tag. Without the `#v0.2.0` suffix `zig fetch` resolves the default branch,
 which is a moving target — and because `build.zig.zon` carries a release version
 either way, the resolved dependency is labelled with a version number that need not
 correspond to any tag.
@@ -297,11 +297,28 @@ arrives as early as possible (see issue #7):
       latter across four files, six of them inside the published package, are fixed
       here
 
-**Next:** `0.2.0`, which carries the issue #45 API surface — the HashSLH-DSA
-pre-hash variants (landed) and two removals from the public `Error` set, both
-**breaking**: the stub-era `NotImplemented` and the unreachable `InvalidInput`,
-neither of which was ever returned. Issue #6 (lift the ctgrind AVX-512 pin)
-remains blocked externally on Valgrind.
+**`0.2.0` — the complete FIPS 205 external interface (issue #45):**
+
+- [x] HashSLH-DSA pre-hash variants — `signPreHash` / `verifyPreHash` over the 12
+      approved hash functions (FIPS 205 §10.2.2 Algorithm 23, §10.3 Algorithm 25).
+      All three signature interfaces are now implemented: internal, pure external,
+      and pre-hash
+- [x] **ACVP pre-hash groups no longer skipped** — sigGen 336/336 → **624/624**,
+      sigVer 336/336 → **504/504**, keyGen 120/120. Nothing is skipped by design
+- [x] ⚠️ **BREAKING — two removals from the public `slh_dsa.Error` set.**
+      `NotImplemented` was a stub-era leftover; `InvalidInput` was unreachable by
+      construction, since every key and signature parameter is a fixed-size array
+      pointer and so a wrong length is a compile-time error. Neither was ever
+      returned. Downstream code doing an exhaustive `switch` over `slh_dsa.Error`
+      with no `else` needs the two cases dropped
+- [x] **[`v0.2.0`](https://github.com/nandanito/slh-dsa-zig/releases/tag/v0.2.0)
+      (2026-08-01, experimental).** The `🚧 EXPERIMENTAL` banner stays — this
+      completes an interface, not an audit
+
+**Next:** nothing is queued. Milestones 1–3 and the `0.2.0` surface are all
+closed, and the only open issue is #6 (lift the ctgrind AVX-512 pin), which is
+blocked externally on Valgrind. Phase gate 3 (cumulative fuzzing) continues to
+accrue nightly on its own schedule.
 
 Issue #38 proposed an iterative treehash for `xmss_sign` on the premise that the
 authentication path recomputes shared subtrees. It does not: the `h'` sibling
