@@ -123,8 +123,13 @@ the library signs arbitrarily long messages with **no allocation and no copy** o
 the message body.
 
 This is why `signCore` takes `msg_parts` rather than a message: it is the one
-design decision that lets the internal and external interfaces share an
-implementation without either one copying.
+design decision that lets all three interfaces — internal, external, and
+pre-hash — share an implementation without any of them copying.
+
+The pre-hash interface is where that paid off. `M'` there is
+`toByte(1,1) ‖ toByte(|ctx|,1) ‖ ctx ‖ OID ‖ PH_M`, four parts instead of three,
+and adding it needed no change to this layer at all: the OID and the digest slot
+in as two more slices exactly the way the context prefix slots in as the first.
 
 ## Constant-time properties
 

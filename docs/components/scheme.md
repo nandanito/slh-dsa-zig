@@ -128,7 +128,8 @@ than `2^h` leaves thanks to [the hypertree](hypertree.md).
 
 ## `signCore` — the shared engine
 
-Both interfaces route through one private function taking the message as **parts**:
+All three interfaces route through one private function taking the message as
+**parts**:
 
 ```zig
 fn signCore(
@@ -189,9 +190,9 @@ copy — which matters when the signature is 49,856 bytes.
 reusing it would feed stale height/index fields into the reconstruction. Building a
 second one is cheap (22 zeroed bytes) and unambiguous.
 
-## The two interfaces
+## The three interfaces
 
-**External** (§10.2 Alg 22 / §10.3 Alg 24) — what applications use:
+**External** (§10.2.1 Alg 22 / §10.3 Alg 24) — what applications use:
 
 ```zig
 pub fn signWithContext(out_sig, msg, ctx: []const u8, sk, opt_rand) Error!void {
@@ -211,8 +212,8 @@ pub fn signInternal(out_sig, msg, sk, opt_rand) void {
 }
 ```
 
-These exist because ACVP tests both interfaces separately. Application code should
-use the external one.
+This exists because ACVP tests each interface separately. Application code should
+use one of the external ones.
 
 **Pre-hash** (§10.2.2 Alg 23 / §10.3 Alg 25) — separator `0x01`, and the pre-hash
 function's DER OID signed alongside the digest:
