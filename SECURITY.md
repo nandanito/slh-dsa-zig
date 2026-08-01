@@ -91,8 +91,7 @@ For confirmed issues:
 
 There is no bug bounty programme. Reporters of confirmed issues are credited in a "hall of
 fame" section in this file and in release notes. A formal bounty may be considered once the
-project has external funding (see the funding paths discussed in
-[pq-zig README](https://github.com/nandanito#funding)).
+project has external funding.
 
 ## Hall of fame
 
@@ -122,6 +121,6 @@ physical side channels, supply-chain compromise — requires defences outside th
 - NIST ACVP server (test vectors): <https://github.com/usnistgov/ACVP-Server>
 
 This policy is modelled on the security policies of
-[libsodium](https://github.com/jedisct1/libsodium/blob/master/SECURITY.md),
+[libsodium](https://github.com/jedisct1/libsodium),
 [age](https://github.com/FiloSottile/age/security/policy), and the
 [RustCrypto](https://github.com/RustCrypto) project.

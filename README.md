@@ -24,8 +24,8 @@ walkthroughs mapped to FIPS 205, and a glossary. Built from [`docs/`](docs/).
 
 ## Why this exists
 
-Zig's standard library already ships [ML-KEM (FIPS 203)](https://github.com/ziglang/zig/tree/master/lib/std/crypto/ml_kem)
-and [ML-DSA (FIPS 204)](https://github.com/ziglang/zig/tree/master/lib/std/crypto/ml_dsa) in `std.crypto`.
+Zig's standard library already ships [ML-KEM (FIPS 203)](https://github.com/ziglang/zig/blob/master/lib/std/crypto/ml_kem.zig)
+and [ML-DSA (FIPS 204)](https://github.com/ziglang/zig/blob/master/lib/std/crypto/ml_dsa.zig) in `std.crypto`.
 It does **not** ship SLH-DSA. This project closes that gap, with two goals:
 
 1. **A usable standalone library** for projects that need hash-based PQ signatures *today* and

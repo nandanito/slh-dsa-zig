@@ -9,7 +9,7 @@ session start. Defer to the actual docs for depth; this file is the
 ## What this is
 
 `slh-dsa-zig` — a pure-Zig implementation of SLH-DSA per FIPS 205.
-Phase 1 of the [`pq-zig`](https://github.com/nandanito) post-quantum
+Phase 1 of the [`pq-zig`](https://github.com/pq-zig) post-quantum
 effort. Direct successor in philosophy to
 [`tweetnacl-zig`](https://github.com/nandanito/tweetnacl-zig).
 

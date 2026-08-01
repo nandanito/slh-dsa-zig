@@ -228,8 +228,10 @@ Hot paths handling secret material follow these rules. Any deviation must be jus
 a code comment citing why the secret being accessed is not actually secret in that context.
 
 - **No branches on secret values.** Compare-and-conditional-copy patterns from
-  [`std.crypto.utils`](https://github.com/ziglang/zig/blob/master/lib/std/crypto/utils.zig)
-  are used for selection.
+  [`std.crypto`](https://github.com/ziglang/zig/blob/master/lib/std/crypto.zig)
+  are used for selection. (These live directly in `std.crypto` — e.g.
+  `std.crypto.secureZero`, which this library calls throughout. The old
+  `std.crypto.utils` namespace no longer exists.)
 - **No table indices derived from secret values.** WOTS+ chain lengths are derived from
   the *digest*, which is public after signing — but the per-leaf PRF outputs that feed
   chain bases are secret and never index a table.
