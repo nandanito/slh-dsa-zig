@@ -34,18 +34,25 @@ Current results on all twelve parameter sets:
 | Mode | Passed | Failed | Skipped |
 |---|---|---|---|
 | keyGen | 120 / 120 | 0 | 0 |
-| sigGen | 336 / 336 | 0 | 288 |
-| sigVer | 336 / 336 | 0 | 168 |
+| sigGen | 624 / 624 | 0 | 0 |
+| sigVer | 504 / 504 | 0 | 0 |
 
-The skips are the **pre-hash (`preHash`) groups**, matching the
-[recorded deferral of HashSLH-DSA](../concepts/assembly.md#context-strings). They
-are skipped explicitly by an `Interface` enum that refuses to parse `"preHash"`,
-so a pre-hash vector can never be silently counted as a pass.
+Nothing is skipped. The sigGen and sigVer counts grew by 288 and 168 when the
+[pre-hash interface](../concepts/assembly.md#the-pre-hash-interface) landed and
+the `preHash` groups stopped being skipped.
 
-The runner dispatches **both interfaces**:
+Those groups are worth their weight. FIPS 205 writes out the OIDs for only four
+of the twelve approved pre-hash functions, leaving the rest to the NIST CSOR
+registry — so for eight of them these vectors are the only end-to-end check that
+the right OID went into `M'`. A wrong byte there produces a wrong signature and
+fails loudly.
+
+The runner dispatches **all three interfaces**:
 
 ```zig
-switch (v.interface) {
+if (v.pre_hash) |ph| {
+    S.signPreHash(&sig, v.msg, v.ctx orelse "", ph, sk, opt_rand)
+} else switch (v.interface) {
     .internal => S.signInternal(&sig, v.msg, sk, opt_rand),
     .external => S.signWithContext(&sig, v.msg, v.ctx orelse "", sk, opt_rand),
 }

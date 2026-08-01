@@ -80,12 +80,12 @@ adapter are the only cross-cutting modules.
 
     §8 Algorithms 14–17.
 
--   **[The top-level scheme](scheme.md)** — `src/slh_dsa.zig`
+-   **[The top-level scheme](scheme.md)** — `src/slh_dsa.zig`, `src/prehash.zig`
 
     ---
 
-    §9 and §10: key generation, signing, verification, digest parsing, and the
-    context-string interface.
+    §9 and §10: key generation, signing, verification, digest parsing, and all
+    three signature interfaces — internal, context-string, and pre-hash.
 
 </div>
 

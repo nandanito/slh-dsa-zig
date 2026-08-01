@@ -1,13 +1,14 @@
-//! FIPS 205 §9, §10.3 — Top-level SLH-DSA scheme.
+//! FIPS 205 §9, §10 — Top-level SLH-DSA scheme.
 //!
 //! `Slh_Dsa(param_set)` returns a namespace exposing the public surface
 //! that callers actually use: key generation, signing, and verification.
 //! It drives the FORS, hypertree, and hash layers; the details of each
 //! live in their own modules.
 //!
-//! Status: key generation, signing, and verification are implemented (pure
-//! SLH-DSA with context strings, FIPS 205 §9–§10.3). The HashSLH-DSA pre-hash
-//! variants are deferred by decision (issue #8 / ARCHITECTURE.md).
+//! Status: key generation, signing, and verification are implemented across
+//! all three signature interfaces — the §9.2/§9.3 internal one, the §10.2.1
+//! pure external one with context strings, and the §10.2.2/§10.3 HashSLH-DSA
+//! pre-hash one.
 //!
 //! API shape:
 //!
@@ -16,6 +17,11 @@
 //!   const kp = try Scheme.KeyPair.generate(io);
 //!   try Scheme.sign(&sig, message, &kp.secret_key, opt_rand);
 //!   try Scheme.verify(&sig, message, &kp.public_key);
+//!
+//! and, to sign a digest rather than the content itself (FIPS 205 §10.2.2):
+//!
+//!   try Scheme.signPreHash(&sig, message, ctx, .sha2_256, &kp.secret_key, opt_rand);
+//!   try Scheme.verifyPreHash(&sig, message, ctx, .sha2_256, &kp.public_key);
 //!
 //! The `io` parameter is a `std.Io` providing access to a CSPRNG; this is
 //! the Zig 0.16 idiom that `std.crypto.nacl` and friends already use.
@@ -30,8 +36,12 @@ const hypertree_mod = @import("hypertree.zig");
 const fors_mod = @import("fors.zig");
 const util = @import("util.zig");
 const ct = @import("ct.zig");
+const prehash_mod = @import("prehash.zig");
 
 pub const ParamSet = params_mod.ParamSet;
+
+/// FIPS 205 §10.2.2 — the pre-hash function `PH` for HashSLH-DSA.
+pub const PreHash = prehash_mod.PreHash;
 
 /// SLH-DSA error set.
 pub const Error = error{
@@ -272,6 +282,42 @@ pub fn Slh_Dsa(comptime param_set: ParamSet) type {
         }
 
         // -----------------------------------------------------------------
+        // FIPS 205 §10.2.2 Algorithm 23 — hash_slh_sign (pre-hash interface).
+        //
+        // Signs a digest of the content instead of the content itself:
+        //
+        //   M' = toByte(1,1) ‖ toByte(|ctx|,1) ‖ ctx ‖ OID ‖ PH_M
+        //
+        // Two things separate this from Algorithm 22. The leading domain
+        // separator is 1 rather than 0, so a pre-hash signature can never be
+        // read as a pure one over the same bytes. And OID — the DER encoding
+        // of the pre-hash function's identifier — is signed alongside the
+        // digest, binding the choice of PH into the signature so a digest
+        // produced by one function cannot be replayed as another's.
+        //
+        // `ctx` may be up to 255 bytes; longer returns error.ContextTooLong.
+        //
+        // The digest is not secret: it is a hash of content the verifier also
+        // holds, and it travels inside the signed input. So `digest_buf` needs
+        // no scrubbing, and selecting PH is an ordinary runtime branch.
+        // -----------------------------------------------------------------
+        pub fn signPreHash(
+            out_sig: *Signature,
+            msg: []const u8,
+            ctx: []const u8,
+            ph: PreHash,
+            sk: *const SecretKey,
+            opt_rand: ?*const [p.n]u8,
+        ) Error!void {
+            if (ctx.len > 255) return Error.ContextTooLong;
+            const prefix = [2]u8{ 0x01, @intCast(ctx.len) };
+            const oid = ph.oid();
+            var digest_buf: [prehash_mod.max_digest_length]u8 = undefined;
+            const ph_m = ph.hash(msg, &digest_buf);
+            signCore(out_sig, &[_][]const u8{ &prefix, ctx, &oid, ph_m }, sk, opt_rand);
+        }
+
+        // -----------------------------------------------------------------
         // FIPS 205 §9.3 Algorithm 20 — slh_verify_internal(M, sig, PK).
         //
         // The engine shared by the internal- and external-interface verifiers.
@@ -351,6 +397,36 @@ pub fn Slh_Dsa(comptime param_set: ParamSet) type {
             pk: *const PublicKey,
         ) Error!void {
             return verifyWithContext(sig, msg, "", pk);
+        }
+
+        // -----------------------------------------------------------------
+        // FIPS 205 §10.3 Algorithm 25 — hash_slh_verify (pre-hash interface).
+        //
+        // Rebuilds the same M' as Algorithm 23 and verifies against it:
+        //
+        //   M' = toByte(1,1) ‖ toByte(|ctx|,1) ‖ ctx ‖ OID ‖ PH_M
+        //
+        // The verifier must be told which PH was used; it is not recoverable
+        // from the signature. Supplying the wrong one yields a different M'
+        // and therefore error.InvalidSignature — which is the binding the OID
+        // in M' exists to provide.
+        //
+        // `ctx` > 255 bytes returns error.ContextTooLong: no signature could
+        // have been produced under such a context.
+        // -----------------------------------------------------------------
+        pub fn verifyPreHash(
+            sig: *const Signature,
+            msg: []const u8,
+            ctx: []const u8,
+            ph: PreHash,
+            pk: *const PublicKey,
+        ) Error!void {
+            if (ctx.len > 255) return Error.ContextTooLong;
+            const prefix = [2]u8{ 0x01, @intCast(ctx.len) };
+            const oid = ph.oid();
+            var digest_buf: [prehash_mod.max_digest_length]u8 = undefined;
+            const ph_m = ph.hash(msg, &digest_buf);
+            return verifyCore(sig, &[_][]const u8{ &prefix, ctx, &oid, ph_m }, pk);
         }
     };
 }
@@ -487,4 +563,75 @@ test "slh-dsa: sign/verify round-trips (pure + context) and rejects tampering" {
         try std.testing.expectError(Error.ContextTooLong, S.signWithContext(&sig, msg, &long_ctx, &kp.secret_key, &rnd));
         try std.testing.expectError(Error.ContextTooLong, S.verifyWithContext(&sig, msg, &long_ctx, &kp.public_key));
     }
+}
+
+test "slh-dsa: HashSLH-DSA round-trips, and PH is bound into the signature" {
+    // FIPS 205 §10.2.2 Algorithm 23 / §10.3 Algorithm 25. The ACVP pre-hash
+    // vectors cover the byte-level answer for all twelve functions; what is
+    // property-tested here is the separation the construction is supposed to
+    // provide, which no single vector demonstrates.
+    const S = Slh_Dsa(.slh_dsa_shake_128f);
+    const n = S.params.n;
+
+    var sk_seed: [n]u8 = undefined;
+    var sk_prf: [n]u8 = undefined;
+    var pk_seed: [n]u8 = undefined;
+    for (&sk_seed, 0..) |*b, i| b.* = @intCast(0x21 + i);
+    for (&sk_prf, 0..) |*b, i| b.* = @intCast(0x65 + i);
+    for (&pk_seed, 0..) |*b, i| b.* = @intCast(0xA9 + i);
+    const kp = try S.KeyPair.fromSeeds(&sk_seed, &sk_prf, &pk_seed);
+
+    const msg = "FIPS 205 HashSLH-DSA end-to-end round-trip";
+    const ctx = "prehash-context";
+
+    // Every approved pre-hash function round-trips.
+    var sig: S.Signature = undefined;
+    for (std.enums.values(PreHash)) |ph| {
+        try S.signPreHash(&sig, msg, ctx, ph, &kp.secret_key, null);
+        try S.verifyPreHash(&sig, msg, ctx, ph, &kp.public_key);
+
+        // The message and context still bind, exactly as on the pure path.
+        try std.testing.expectError(Error.InvalidSignature, S.verifyPreHash(&sig, "different message", ctx, ph, &kp.public_key));
+        try std.testing.expectError(Error.InvalidSignature, S.verifyPreHash(&sig, msg, "other-context", ph, &kp.public_key));
+    }
+
+    // PH is bound into M' via its OID, so a signature made under one pre-hash
+    // function must not verify under another. The three checked here all
+    // produce 32-byte digests, so digest length alone cannot be what separates
+    // them — the OID is.
+    const same_length = [_]PreHash{ .sha2_256, .sha3_256, .sha2_512_256 };
+    for (same_length) |signer_ph| {
+        try std.testing.expectEqual(@as(usize, 32), signer_ph.digestLength());
+        try S.signPreHash(&sig, msg, ctx, signer_ph, &kp.secret_key, null);
+        for (same_length) |verifier_ph| {
+            if (verifier_ph == signer_ph) continue;
+            try std.testing.expectError(
+                Error.InvalidSignature,
+                S.verifyPreHash(&sig, msg, ctx, verifier_ph, &kp.public_key),
+            );
+        }
+    }
+
+    // Domain separation against the pure interfaces: the 0x01 separator of
+    // Algorithm 23 must not be interchangeable with Algorithm 22's 0x00, in
+    // either direction, even for the same message and context.
+    try S.signPreHash(&sig, msg, ctx, .sha2_256, &kp.secret_key, null);
+    try std.testing.expectError(Error.InvalidSignature, S.verifyWithContext(&sig, msg, ctx, &kp.public_key));
+    try std.testing.expectError(Error.InvalidSignature, S.verifyInternal(&sig, msg, &kp.public_key));
+
+    var pure_sig: S.Signature = undefined;
+    try S.signWithContext(&pure_sig, msg, ctx, &kp.secret_key, null);
+    try std.testing.expectError(Error.InvalidSignature, S.verifyPreHash(&pure_sig, msg, ctx, .sha2_256, &kp.public_key));
+
+    // Deterministic when opt_rand is null, matching the pure path.
+    var det1: S.Signature = undefined;
+    var det2: S.Signature = undefined;
+    try S.signPreHash(&det1, msg, ctx, .sha2_512, &kp.secret_key, null);
+    try S.signPreHash(&det2, msg, ctx, .sha2_512, &kp.secret_key, null);
+    try std.testing.expectEqualSlices(u8, &det1, &det2);
+
+    // Context length is checked before any hashing or signing work.
+    const long_ctx = [_]u8{0} ** 256;
+    try std.testing.expectError(Error.ContextTooLong, S.signPreHash(&sig, msg, &long_ctx, .sha2_256, &kp.secret_key, null));
+    try std.testing.expectError(Error.ContextTooLong, S.verifyPreHash(&sig, msg, &long_ctx, .sha2_256, &kp.public_key));
 }

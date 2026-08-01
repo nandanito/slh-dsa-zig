@@ -88,17 +88,43 @@ FIPS 205 §11.2 — Hash functions (SHA-2)         src/hash_sha2.zig
 | Alg | § | Name | Implementation |
 |---|---|---|---|
 | 21 | 10.1 | `slh_keygen()` | `KeyPair.generate` |
-| 22 | 10.2 | `slh_sign` | `signWithContext` (and `sign`, `ctx = ""`) |
-| 23 | 10.2 | `hash_slh_sign(M, ctx, PH, SK)` | **Deferred** — [decision](../concepts/assembly.md#context-strings) |
+| 22 | 10.2.1 | `slh_sign` | `signWithContext` (and `sign`, `ctx = ""`) |
+| 23 | 10.2.2 | `hash_slh_sign(M, ctx, PH, SK)` | `signPreHash` |
 | 24 | 10.3 | `slh_verify` | `verifyWithContext` (and `verify`, `ctx = ""`) |
-| 25 | 10.3 | `hash_slh_verify(M, SIG, ctx, PH, PK)` | **Deferred** |
+| 25 | 10.3 | `hash_slh_verify(M, SIG, ctx, PH, PK)` | `verifyPreHash` |
 
-The two deferred entries carry their full signatures because that is the shape a
-future implementation has to match: `PH` selects the pre-hash function, and its
-identity is bound into the signature via an OID alongside the `0x01` domain
-separator. Note `slh_keygen()` takes no arguments — it draws its three seeds from
-an approved RBG internally, which is why this library's deterministic entry point
-is the §9.1 `KeyPair.fromSeeds` rather than a variant of this one.
+`PH` selects the pre-hash function (`slh_dsa.PreHash`); its identity is bound into
+the signature via an OID alongside the `0x01` domain separator. Note `slh_keygen()`
+takes no arguments — it draws its three seeds from an approved RBG internally,
+which is why this library's deterministic entry point is the §9.1
+`KeyPair.fromSeeds` rather than a variant of this one.
+
+### Pre-hash functions — §10.2.2
+
+FIPS 205 writes out the OIDs for four functions and leaves `case …  ▷ other
+approved hash functions or XOFs` open. The twelve below are those the NIST ACVP
+vectors exercise; all share the DER prefix `06 09 60 86 48 01 65 03 04 02` (the
+`nistAlgorithms.hashAlgs` arc `2.16.840.1.101.3.4.2`) and differ in the final byte.
+
+| `PreHash` | ACVP `hashAlg` | Arc | `PH_M` bytes | In FIPS 205? |
+|---|---|---|---|---|
+| `.sha2_224` | `SHA2-224` | 4 | 28 | |
+| `.sha2_256` | `SHA2-256` | 1 | 32 | ✅ verbatim |
+| `.sha2_384` | `SHA2-384` | 2 | 48 | |
+| `.sha2_512` | `SHA2-512` | 3 | 64 | ✅ verbatim |
+| `.sha2_512_224` | `SHA2-512/224` | 5 | 28 | |
+| `.sha2_512_256` | `SHA2-512/256` | 6 | 32 | |
+| `.sha3_224` | `SHA3-224` | 7 | 28 | |
+| `.sha3_256` | `SHA3-256` | 8 | 32 | |
+| `.sha3_384` | `SHA3-384` | 9 | 48 | |
+| `.sha3_512` | `SHA3-512` | 10 | 64 | |
+| `.shake_128` | `SHAKE-128` | 11 | 32 | ✅ verbatim |
+| `.shake_256` | `SHAKE-256` | 12 | 64 | ✅ verbatim |
+
+The two XOF lengths are fixed by FIPS 205 — `SHAKE128(M, 256)` and
+`SHAKE256(M, 512)` — rather than by the primitive, so `src/prehash.zig` declares
+them from the standard and asserts at compile time that they still agree with the
+`std` defaults.
 
 ## The six hash functions — §11
 
@@ -144,6 +170,5 @@ secret versus *using* it — see [ADRS](../components/adrs.md#type-values).
 
 | Feature | Status |
 |---|---|
-| HashSLH-DSA (Algorithms 23, 25) | Deferred by recorded decision |
 | Runtime parameter-set dispatch | [Deliberate non-goal](../implementation/index.md#deliberate-non-goals) |
 | SIMD / vectorised Keccak | Deliberate non-goal; the bench gate is pinned to PQClean `clean` accordingly |

@@ -80,9 +80,9 @@ third-party audit, regardless of how many gates are green.
 ## Current state
 
 Implemented and ACVP-validated across all twelve parameter sets: key generation,
-signing and verification, both interfaces, with context strings. Pre-hash
-(HashSLH-DSA) is deferred by
-[recorded decision](../concepts/assembly.md#context-strings).
+signing and verification, all three signature interfaces — internal, external
+(pure, with context strings), and
+[pre-hash](../concepts/assembly.md#the-pre-hash-interface) (HashSLH-DSA).
 
 Hardening is in progress — see the [README][readme] status table for what is
 green today, and [MILESTONES.md][milestones] for the development log. This site

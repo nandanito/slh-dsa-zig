@@ -17,12 +17,12 @@
 //! Lane: this file is Lane A. It is test infrastructure, not crypto core,
 //! and is intentionally not in the upstream-candidate tree.
 //!
-//! Status: keyGen, sigGen, and sigVer are fully wired. sigGen drives the
-//! §9.2 internal signer (`signInternal`) and the §10.2 external signer
-//! (`signWithContext`, context-string domain separation); sigVer drives
-//! §9.3 / §10.3. HashSLH-DSA pre-hash groups (`preHash` other than "none" /
-//! "pure") are out of scope — deferred per issue #8 — and skipped by the
-//! CLI walker in `kat_main.zig`.
+//! Status: keyGen, sigGen, and sigVer are fully wired, across all three
+//! signature interfaces. sigGen drives the §9.2 internal signer
+//! (`signInternal`), the §10.2.1 external signer (`signWithContext`,
+//! context-string domain separation), and the §10.2.2 pre-hash signer
+//! (`signPreHash`, HashSLH-DSA); sigVer drives their §9.3 / §10.3
+//! counterparts. No group is skipped.
 
 const std = @import("std");
 const slh_dsa = @import("slh_dsa");
@@ -47,8 +47,10 @@ pub const VectorType = enum {
 ///   - external : prepend the domain separator + context string
 ///                (FIPS 205 §10.2 / §10.3).
 ///
-/// The HashSLH-DSA pre-hash variant (`preHash: "preHash"`) is a third axis
-/// handled by the group walker, which skips it (out of scope, issue #8).
+/// The HashSLH-DSA pre-hash variant (`preHash: "preHash"`) is an orthogonal
+/// third axis, carried separately as `pre_hash` on the decoded vectors rather
+/// than folded in here — ACVP reports the two independently, and every
+/// pre-hash group is also an `external` group.
 pub const Interface = enum {
     internal,
     external,
@@ -59,6 +61,35 @@ pub const Interface = enum {
         return null;
     }
 };
+
+/// Re-exported so the walker in `kat_main.zig` can name the type without
+/// reaching past this module into the library.
+pub const PreHash = slh_dsa.PreHash;
+
+/// Parsed ACVP `hashAlg` name -> the pre-hash function (FIPS 205 §10.2.2).
+///
+/// Only meaningful inside a `preHash: "preHash"` group; pure and internal
+/// groups report `hashAlg: "none"`, which has no `PreHash` and maps to null.
+pub fn parsePreHash(name: []const u8) ?slh_dsa.PreHash {
+    const map = .{
+        .{ "SHA2-224", slh_dsa.PreHash.sha2_224 },
+        .{ "SHA2-256", slh_dsa.PreHash.sha2_256 },
+        .{ "SHA2-384", slh_dsa.PreHash.sha2_384 },
+        .{ "SHA2-512", slh_dsa.PreHash.sha2_512 },
+        .{ "SHA2-512/224", slh_dsa.PreHash.sha2_512_224 },
+        .{ "SHA2-512/256", slh_dsa.PreHash.sha2_512_256 },
+        .{ "SHA3-224", slh_dsa.PreHash.sha3_224 },
+        .{ "SHA3-256", slh_dsa.PreHash.sha3_256 },
+        .{ "SHA3-384", slh_dsa.PreHash.sha3_384 },
+        .{ "SHA3-512", slh_dsa.PreHash.sha3_512 },
+        .{ "SHAKE-128", slh_dsa.PreHash.shake_128 },
+        .{ "SHAKE-256", slh_dsa.PreHash.shake_256 },
+    };
+    inline for (map) |entry| {
+        if (std.mem.eql(u8, name, entry[0])) return entry[1];
+    }
+    return null;
+}
 
 /// Parsed ACVP parameter-set name -> our enum.
 pub fn parseParamSet(name: []const u8) ?slh_dsa.ParamSet {
@@ -106,6 +137,10 @@ pub const SigGenVector = struct {
     /// The per-signature randomiser (`additionalRandomness`), `null` for
     /// deterministic signing (opt_rand defaults to PK.seed per FIPS 205 §9.2).
     opt_rand: ?[]u8,
+    /// The pre-hash function for a HashSLH-DSA vector (FIPS 205 §10.2.2),
+    /// or `null` for a pure/internal vector. When set it takes precedence
+    /// over `interface`, which ACVP always reports as `external` here.
+    pre_hash: ?slh_dsa.PreHash = null,
     expected_sig: []u8,
 };
 
@@ -120,6 +155,9 @@ pub const SigVerVector = struct {
     /// the internal interface.
     ctx: ?[]u8,
     sig: []u8,
+    /// The pre-hash function for a HashSLH-DSA vector (FIPS 205 §10.3), or
+    /// `null` for a pure/internal vector.
+    pre_hash: ?slh_dsa.PreHash = null,
     expected_accept: bool,
 };
 
@@ -336,7 +374,10 @@ pub fn runSigGen(
             const opt_rand: ?*const [n]u8 = if (v.opt_rand) |r| r[0..n] else null;
 
             var sig: S.Signature = undefined;
-            switch (v.interface) {
+            if (v.pre_hash) |ph| {
+                S.signPreHash(&sig, v.msg, v.ctx orelse "", ph, sk, opt_rand) catch |err|
+                    return fail(allocator, v.tc_id, v.param_set, "signPreHash failed: {s}", .{@errorName(err)});
+            } else switch (v.interface) {
                 .internal => S.signInternal(&sig, v.msg, sk, opt_rand),
                 .external => S.signWithContext(&sig, v.msg, v.ctx orelse "", sk, opt_rand) catch |err|
                     return fail(allocator, v.tc_id, v.param_set, "signWithContext failed: {s}", .{@errorName(err)}),
@@ -344,6 +385,8 @@ pub fn runSigGen(
 
             if (std.mem.eql(u8, &sig, v.expected_sig))
                 return .{ .tc_id = v.tc_id, .param_set = v.param_set, .pass = true };
+            if (v.pre_hash) |ph|
+                return fail(allocator, v.tc_id, v.param_set, "signature mismatch (pre-hash {s})", .{@tagName(ph)});
             return fail(allocator, v.tc_id, v.param_set, "signature mismatch ({s} interface)", .{@tagName(v.interface)});
         },
     }
@@ -367,7 +410,9 @@ pub fn runSigVer(
                     break :blk false;
                 const pk: *const S.PublicKey = v.pk[0..S.public_key_length];
                 const sig: *const S.Signature = v.sig[0..S.signature_length];
-                const res = switch (v.interface) {
+                const res = if (v.pre_hash) |ph|
+                    S.verifyPreHash(sig, v.msg, v.ctx orelse "", ph, pk)
+                else switch (v.interface) {
                     .internal => S.verifyInternal(sig, v.msg, pk),
                     .external => S.verifyWithContext(sig, v.msg, v.ctx orelse "", pk),
                 };
@@ -376,6 +421,8 @@ pub fn runSigVer(
 
             if (accepted == v.expected_accept)
                 return .{ .tc_id = v.tc_id, .param_set = v.param_set, .pass = true };
+            if (v.pre_hash) |ph|
+                return fail(allocator, v.tc_id, v.param_set, "verify accepted={}, expected accepted={} (pre-hash {s})", .{ accepted, v.expected_accept, @tagName(ph) });
             return fail(allocator, v.tc_id, v.param_set, "verify accepted={}, expected accepted={} ({s} interface)", .{ accepted, v.expected_accept, @tagName(v.interface) });
         },
     }
@@ -417,6 +464,28 @@ test "Interface.fromString" {
     try std.testing.expectEqual(@as(?Interface, .internal), Interface.fromString("internal"));
     try std.testing.expectEqual(@as(?Interface, .external), Interface.fromString("external"));
     try std.testing.expectEqual(@as(?Interface, null), Interface.fromString("preHash"));
+}
+
+test "parsePreHash maps every ACVP hashAlg the vectors use" {
+    // The twelve names that appear as `hashAlg` across siggen.json and
+    // sigver.json. ACVP spells the XOFs "SHAKE-128"/"SHAKE-256" (hyphenated),
+    // unlike FIPS 205's "SHAKE128"/"SHAKE256", so these strings are matched
+    // against the vector files rather than the standard's prose.
+    const cases = .{
+        .{ "SHA2-224", PreHash.sha2_224 },         .{ "SHA2-256", PreHash.sha2_256 },
+        .{ "SHA2-384", PreHash.sha2_384 },         .{ "SHA2-512", PreHash.sha2_512 },
+        .{ "SHA2-512/224", PreHash.sha2_512_224 }, .{ "SHA2-512/256", PreHash.sha2_512_256 },
+        .{ "SHA3-224", PreHash.sha3_224 },         .{ "SHA3-256", PreHash.sha3_256 },
+        .{ "SHA3-384", PreHash.sha3_384 },         .{ "SHA3-512", PreHash.sha3_512 },
+        .{ "SHAKE-128", PreHash.shake_128 },       .{ "SHAKE-256", PreHash.shake_256 },
+    };
+    inline for (cases) |c| {
+        try std.testing.expectEqual(@as(?PreHash, c[1]), parsePreHash(c[0]));
+    }
+    // Pure and internal groups report "none": no pre-hash function.
+    try std.testing.expectEqual(@as(?PreHash, null), parsePreHash("none"));
+    try std.testing.expectEqual(@as(?PreHash, null), parsePreHash("SHAKE128"));
+    try std.testing.expectEqual(@as(?PreHash, null), parsePreHash(""));
     try std.testing.expectEqual(@as(?Interface, null), Interface.fromString(""));
 }
 

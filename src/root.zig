@@ -22,6 +22,10 @@ pub const ParamSet = slh_dsa_mod.ParamSet;
 pub const Error = slh_dsa_mod.Error;
 pub const Slh_Dsa = slh_dsa_mod.Slh_Dsa;
 
+/// FIPS 205 §10.2.2 — selects the pre-hash function for the HashSLH-DSA
+/// (`signPreHash` / `verifyPreHash`) entry points.
+pub const PreHash = slh_dsa_mod.PreHash;
+
 // -- Internal modules re-exported for in-tree testing only ---------------
 //
 // These are not part of the stable public API. They are exposed here so
@@ -40,6 +44,7 @@ pub const internal = struct {
     pub const xmss = @import("xmss.zig");
     pub const hypertree = @import("hypertree.zig");
     pub const fors = @import("fors.zig");
+    pub const prehash = @import("prehash.zig");
 };
 
 // -- Test surface ---------------------------------------------------------

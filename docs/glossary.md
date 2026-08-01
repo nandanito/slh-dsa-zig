@@ -177,9 +177,9 @@ box for anything specific.
 
 **HashSLH-DSA**
 :   The pre-hash variants `hash_slh_sign` / `hash_slh_verify`, which sign `PH(M)`
-    with separator `0x01` plus a hash OID. **Deferred** in this library by
-    recorded decision. See
-    [context strings](concepts/assembly.md#context-strings).
+    with separator `0x01` plus a hash OID. Implemented as `signPreHash` /
+    `verifyPreHash` over twelve approved hash functions and XOFs. See
+    [the pre-hash interface](concepts/assembly.md#the-pre-hash-interface).
 
 **Hedged signing**
 :   Signing with fresh randomness in `opt_rand` — the recommendation. Contrast

@@ -20,6 +20,10 @@
 //!     never panic; never accept (FIPS 205 §9.3/§10.3 slh_verify). One target
 //!     per hash family so both hash dispatchers (§11.1 SHAKE, §11.2 SHA-2)
 //!     are exercised.
+//!   - verifyPreHash (same two parameter sets): the same oracle for the
+//!     HashSLH-DSA verifier (§10.3 Algorithm 25), with the pre-hash function
+//!     and context string also drawn from fuzzer bytes so all twelve `M'`
+//!     layouts are reachable.
 //!   - ACVP vector parser + hexDecode: feed arbitrary bytes to the real
 //!     `runVectors` walker (tests/kat_main.zig) and the `hexDecode` leaf
 //!     parser. Property: never panic on malformed input — a controlled error
@@ -74,6 +78,58 @@ test "fuzz: verify rejects arbitrary bytes (SLH-DSA-SHAKE-128f)" {
 
 test "fuzz: verify rejects arbitrary bytes (SLH-DSA-SHA2-128f)" {
     try std.testing.fuzz({}, verifySha2128f, .{});
+}
+
+/// Same oracle for the pre-hash verifier (FIPS 205 §10.3 Algorithm 25), which
+/// is equally attacker-facing: the signature, message, and context all arrive
+/// from outside.
+///
+/// The pre-hash function is drawn from the fuzzer's bytes too, so every one of
+/// the twelve `M'` layouts — three digest lengths across two hash families plus
+/// the XOFs — is reachable. `ctx` is capped at 255 bytes so that
+/// `error.ContextTooLong` cannot mask a missing rejection: `InvalidSignature`
+/// stays the single acceptable outcome.
+fn fuzzVerifyPreHash(comptime param_set: slh_dsa.ParamSet, smith: *Smith) anyerror!void {
+    const Scheme = slh_dsa.Slh_Dsa(param_set);
+    const all = comptime std.enums.values(slh_dsa.PreHash);
+
+    var pk: Scheme.PublicKey = undefined;
+    var sig: Scheme.Signature = undefined;
+    var selector: [1]u8 = undefined;
+    var msg_buf: [256]u8 = undefined;
+    var ctx_buf: [255]u8 = undefined;
+
+    smith.bytes(&pk);
+    smith.bytes(&sig);
+    smith.bytes(&selector);
+    const msg_len = smith.slice(&msg_buf);
+    const ctx_len = smith.slice(&ctx_buf);
+
+    const ph = all[selector[0] % all.len];
+
+    try std.testing.expectError(error.InvalidSignature, Scheme.verifyPreHash(
+        &sig,
+        msg_buf[0..msg_len],
+        ctx_buf[0..ctx_len],
+        ph,
+        &pk,
+    ));
+}
+
+fn verifyPreHashShake128f(_: void, smith: *Smith) anyerror!void {
+    return fuzzVerifyPreHash(.slh_dsa_shake_128f, smith);
+}
+
+fn verifyPreHashSha2128f(_: void, smith: *Smith) anyerror!void {
+    return fuzzVerifyPreHash(.slh_dsa_sha2_128f, smith);
+}
+
+test "fuzz: verifyPreHash rejects arbitrary bytes (SLH-DSA-SHAKE-128f)" {
+    try std.testing.fuzz({}, verifyPreHashShake128f, .{});
+}
+
+test "fuzz: verifyPreHash rejects arbitrary bytes (SLH-DSA-SHA2-128f)" {
+    try std.testing.fuzz({}, verifyPreHashSha2128f, .{});
 }
 
 // ---------------------------------------------------------------------------

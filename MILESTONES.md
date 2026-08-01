@@ -369,3 +369,92 @@ of re-pointing users only ever rises from here.
 
 `v0.1.0` stays published and marked superseded. It is the honest record of what
 was tagged.
+
+---
+
+## HashSLH-DSA and the 0.2.0 error set (#45, 2026-07-31)
+
+Two changes to the public surface, both bound for `0.2.0`.
+
+### HashSLH-DSA — the pre-hash variants (FIPS 205 §10.2.2 / §10.3)
+
+Deferred through `0.1.x` on a recorded decision: `std.crypto` ships ML-DSA
+without HashML-DSA, so a pure-only surface matched the sibling algorithm.
+
+That argument was reconsidered rather than repeated. It is an argument about
+**upstream parity**, which governs the `upstream-candidate/` tree — not this
+library. And the upstream path itself is currently unexecutable (#11). Against
+that stood 456 pinned NIST ACVP vectors — 288 sigGen, 168 sigVer — that the KAT
+runner had been skipping since Milestone 2: roughly 40% of the available
+signing and verification evidence, unused.
+
+**Implementation.** `src/prehash.zig` supplies exactly two things per function —
+the DER-encoded OID and `PH_M` — and `slh_dsa.zig` assembles
+
+```
+M' = toByte(1,1) ‖ toByte(|ctx|,1) ‖ ctx ‖ OID ‖ PH_M
+```
+
+through the same part-wise `msg_parts` absorption the pure path already used, so
+pre-hashing copies neither the message nor the context. The digest is public, so
+no scrubbing and no constant-time obligation; `PreHash` is deliberately a runtime
+enum, since protocols select the hash from wire data and the branch is noise next
+to hashing the message.
+
+**The part FIPS 205 does not give you.** Algorithm 23 writes out the OIDs for
+only four functions — SHA-256, SHA-512, SHAKE128, SHAKE256 — and leaves
+`case …  ▷ other approved hash functions or XOFs` open. The other eight came
+from the NIST CSOR `nistAlgorithms.hashAlgs` arc. Three independent checks were
+used rather than one: the four verbatim OIDs are asserted byte-for-byte against
+the standard in a unit test, all twelve are cross-checked against the registry,
+and the ACVP vectors are the functional oracle — a wrong OID byte yields a wrong
+signature and fails loudly.
+
+A second trap: FIPS 205 fixes the XOF output lengths itself — `SHAKE128(M, 256)`
+and `SHAKE256(M, 512)` — independently of the primitive. Those lengths are
+declared from the standard, with a compile-time assertion that they still agree
+with std's defaults, so a future std change breaks the build instead of silently
+signing a different digest.
+
+**Vector-format detail worth recording.** `preHash` is a *group-level* axis but
+`hashAlg` is a *per-test* field: ACVP varies the pre-hash function within one
+group. Every test carries `hashAlg`, including pure ones, where it reads
+`"none"` — so its presence proves nothing and the group's `preHash` value is
+what decides. Pre-hash groups are always `signatureInterface: "external"`.
+
+### Two dead variants removed from `Error` (BREAKING)
+
+- `NotImplemented` — a stub-era leftover, never returned. Its doc comment still
+  claimed "function body has not been implemented yet", which had been false
+  since Milestone 2.
+- `InvalidInput` — found while verifying that the *remaining* variants were
+  reachable after the first removal. It was not. It is dead by construction:
+  every key and signature parameter is a fixed-size array pointer, so "wrong
+  length" is a compile-time error. `docs/components/scheme.md` had said as much
+  about the verification path; it held on every path.
+
+Both were removed together because in Zig *adding* a variant to a public error
+set is as breaking as removing one — an exhaustive `switch` with no `else` fails
+either way. Reserving `InvalidInput` for a future parsing API would therefore
+have bought no flexibility, while taxing every caller in the meantime. `0.2.0`
+is one break instead of two.
+
+### Validation
+
+| Mode   | Before                    | After                  |
+|--------|---------------------------|------------------------|
+| keyGen | 120/120, 0 skipped        | **120/120**, 0 skipped |
+| sigGen | 336/336, **288 skipped**  | **624/624**, 0 skipped |
+| sigVer | 336/336, **168 skipped**  | **504/504**, 0 skipped |
+
+No ACVP group is skipped by design any more. Alongside the vectors, spec-derived
+property tests cover what no single vector shows: that PH is genuinely bound
+into the signature (a signature under `.sha2_256` is rejected under `.sha3_256`
+and `.sha2_512_256`, all three of which produce 32-byte digests, so digest
+length alone cannot be what separates them), and that the `0x01` separator is
+not interchangeable with the pure path's `0x00` in either direction.
+
+### Reference
+
+Issues: #45 (both halves), #8 (closed — the original deferral), #11 (upstream).
+PRs: #59 (`NotImplemented`), #60 (`InvalidInput`), #61 (HashSLH-DSA).

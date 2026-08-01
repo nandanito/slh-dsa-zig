@@ -63,8 +63,9 @@ post-quantum cryptography effort in Zig, and the direct successor to
 | Hypertree | FIPS 205 §7 | ✅ `ht_sign`, `ht_verify` (property-tested) |
 | FORS | FIPS 205 §8 | ✅ `skGen`, `node`, `sign`, `pkFromSig` (property-tested) |
 | SLH-DSA key generation | FIPS 205 §9.1, §10.1 | ✅ ACVP keyGen KATs pass (120/120, all 12 sets) |
-| SLH-DSA sign / verify | FIPS 205 §9.2–9.3, §10 | ✅ ACVP sigGen/sigVer KATs pass (all 12 sets, internal + external) · pre-hash deferred |
-| NIST ACVP KAT runner | — | ✅ keyGen · sigGen · sigVer modes (pre-hash groups skipped) |
+| SLH-DSA sign / verify | FIPS 205 §9.2–9.3, §10 | ✅ ACVP sigGen/sigVer KATs pass (all 12 sets; internal, external, and pre-hash) |
+| HashSLH-DSA (pre-hash) | FIPS 205 §10.2.2, §10.3 | ✅ `signPreHash` / `verifyPreHash`, 12 approved hash functions · ACVP pre-hash KATs pass (288 sigGen + 168 sigVer) |
+| NIST ACVP KAT runner | — | ✅ keyGen · sigGen · sigVer modes, no groups skipped |
 | Benchmarks vs PQClean | — | ✅ Gated portable-vs-portable on x86-64: **35/36 inside the 2× gate**, worst 2.06× (`SHA2-256s keygen`) (#10, #40) · SHAKE parity at 0.96× isolates the excess to the hash-adapter layer (`std.crypto`'s SHA-2 — SHA-512 at this security level, not SHA-256), not to this library's structural code · accelerated build passes 36/36, published alongside but not gated |
 | Constant-time verification | ctgrind / valgrind | ✅ Key generation + signing verified constant-time in SK.seed/SK.prf under Valgrind, plus the WOTS+/FORS primitives in isolation (#34) · run on SHAKE/SHA2-128f + 192f, which cover every adapter code path (incl. the SHA-512 widening); other sets differ only in public tree geometry · x86-64-v3 only; AVX-512 paths open (#6) |
 | Fuzz harnesses | std.testing.fuzz | 🚧 Harnesses wired (verify, ACVP parser); cumulative nightly fuzzing accruing toward the 24h gate (#9) |
@@ -78,9 +79,12 @@ chain — WOTS+/XMSS sign, the hypertree, FORS, and the top-level `slh_sign` / `
 (pure SLH-DSA with context strings, §9.2–9.3/§10.2–10.3) — is implemented and validated
 against the NIST ACVP sigGen/sigVer vectors: sigGen reproduces the expected signatures
 byte-for-byte and sigVer matches every accept/reject decision across all 12 parameter sets,
-for both the internal and external (context-string) interfaces. That closes the formal
-Milestone 2 exit gate (issue #25). The HashSLH-DSA pre-hash variants are deferred by decision
-(issue #8), so those ACVP groups are skipped.
+for the internal and external (context-string) interfaces. That closes the formal
+Milestone 2 exit gate (issue #25).
+
+The HashSLH-DSA pre-hash variants (§10.2.2/§10.3) landed for `0.2.0` (issue #45) and are
+validated by the same corpus: the previously skipped ACVP pre-hash groups now run and pass,
+taking sigGen to 624/624 and sigVer to 504/504 with nothing skipped.
 
 ## Parameter sets
 
@@ -131,8 +135,8 @@ exe.root_module.addImport("slh_dsa", slh_dsa_dep.module("slh_dsa"));
 
 The public API is comptime-parameterised; you pick a parameter set and get back a namespace
 with key/signature byte sizes and the operations. Key generation, signing, and verification
-are implemented (pure SLH-DSA with context strings); the HashSLH-DSA pre-hash variants are
-deferred (issue #45).
+are implemented across all three FIPS 205 signature interfaces: the internal one, the pure
+external one with context strings, and the HashSLH-DSA pre-hash one.
 
 ```zig
 const std = @import("std");
@@ -160,8 +164,19 @@ pub fn main() !void {
     // With a context string (max 255 bytes; > 255 → error.ContextTooLong):
     try Scheme.signWithContext(&sig, message, "my-app-v1", &kp.secret_key, null);
     try Scheme.verifyWithContext(&sig, message, "my-app-v1", &kp.public_key);
+
+    // HashSLH-DSA (FIPS 205 §10.2.2): sign a digest of the message instead of
+    // the message itself. The verifier must be told which pre-hash function was
+    // used — it is not recoverable from the signature, and the wrong one gives
+    // error.InvalidSignature.
+    try Scheme.signPreHash(&sig, message, "my-app-v1", .sha2_256, &kp.secret_key, null);
+    try Scheme.verifyPreHash(&sig, message, "my-app-v1", .sha2_256, &kp.public_key);
 }
 ```
+
+`slh_dsa.PreHash` lists the twelve approved pre-hash functions: `.sha2_224`, `.sha2_256`,
+`.sha2_384`, `.sha2_512`, `.sha2_512_224`, `.sha2_512_256`, `.sha3_224`, `.sha3_256`,
+`.sha3_384`, `.sha3_512`, `.shake_128`, and `.shake_256`.
 
 Compatibility target: **byte-for-byte identical signatures to the FIPS 205 reference and to
 `std.crypto.sign.slh_dsa` once that exists**. Verified via NIST ACVP vectors (see
@@ -282,9 +297,11 @@ arrives as early as possible (see issue #7):
       latter across four files, six of them inside the published package, are fixed
       here
 
-**Next (post-v0.1.1):** issue #45 (HashSLH-DSA pre-hash variants, part of the
-`0.2.0` API surface) and issue #6 (lift the ctgrind AVX-512 pin, blocked
-externally on Valgrind).
+**Next:** `0.2.0`, which carries the issue #45 API surface — the HashSLH-DSA
+pre-hash variants (landed) and two removals from the public `Error` set, both
+**breaking**: the stub-era `NotImplemented` and the unreachable `InvalidInput`,
+neither of which was ever returned. Issue #6 (lift the ctgrind AVX-512 pin)
+remains blocked externally on Valgrind.
 
 Issue #38 proposed an iterative treehash for `xmss_sign` on the premise that the
 authentication path recomputes shared subtrees. It does not: the `h'` sibling
