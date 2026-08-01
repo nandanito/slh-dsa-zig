@@ -122,6 +122,29 @@ Authoritative sources, in order of preference:
 Blog posts are not citations. Wikipedia is not a citation. Stack
 Overflow is not a citation.
 
+**FIPS 205 is not always a complete oracle — sometimes it defers to an
+external registry.** The rule "when in doubt, the standard decides" fails
+silently in those places, because the standard simply does not contain the
+answer and you will not notice unless you are looking. The known instance:
+§10.2.2 Algorithm 23 writes out the DER OIDs for only **four** of the twelve
+approved pre-hash functions and ends with
+
+```
+21:  case …                    ▷ other approved hash functions or XOFs
+```
+
+The other eight come from the NIST CSOR `nistAlgorithms.hashAlgs` arc
+(`2.16.840.1.101.3.4.2`). A related trap in the same algorithm: FIPS 205
+fixes the XOF output lengths itself — `SHAKE128(M, 256)`, `SHAKE256(M, 512)`
+— independently of the primitive, so reading a length off `std`'s type
+happens to work today and is not the same claim.
+
+When the standard defers like this, do not substitute recall. **Validate
+three ways:** pin whatever the standard *does* state verbatim in a unit test,
+cross-check the remainder against the registry, and make sure a functional
+oracle (usually ACVP) would fail loudly if a value were wrong. See
+`src/prehash.zig` for the worked example.
+
 **Cite the final publication (FIPS 205, August 2024), never the initial
 public draft (ipd).** The final standard inserted Algorithm 1 (`gen_len2`,
 §3.2), which shifted every later algorithm number up by one relative to the
@@ -178,6 +201,34 @@ zig build bench -Dbench-optimize=ReleaseSafe
 
 If any of those fail, **fix it before reporting back.** Don't claim a
 change works if you didn't actually run the build.
+
+### Extra step at release prep: what actually ships
+
+`build.zig.zon`'s `paths` includes **`src`, `tests`, `bench`, `examples`**
+plus `README.md`, `SECURITY.md`, `ARCHITECTURE.md` and `CONTRIBUTING.md`.
+Everything in those directories reaches anyone who runs `zig fetch`. Stale
+"not implemented yet" text in `examples/` or `tests/` is therefore **shipped
+documentation**, not an internal note — and nothing executes a comment, so it
+survives every change that makes it false.
+
+This has cost corrections in two consecutive releases: `v0.1.1` existed
+largely because `examples/basic_sign.zig` claimed the library panics, and
+`v0.2.0` prep found three more that `v0.1.1` had missed. Before bumping a
+version:
+
+```sh
+rg -n -i "will @panic|@panic until|stub|not yet implemented|skeleton|planned API|once the implementation" \
+   README.md SECURITY.md ARCHITECTURE.md CONTRIBUTING.md examples/ src/ tests/ bench/
+```
+
+Then **run** the examples rather than reading them — `zig build
+example_basic_sign` prints a full keygen/sign/verify/tamper-reject cycle,
+which refutes any "it panics" claim directly.
+
+Also check the version choice itself. In `0.x`, a **breaking** change takes
+the minor slot (`0.1.1` → `0.2.0`), never the patch slot: a patch release
+means "drop-in safe". Removing a variant from a public error set is breaking,
+because an exhaustive `switch` with no `else` stops compiling.
 
 ---
 
@@ -335,6 +386,12 @@ gates apply and which you've satisfied.
 - Never push to `main` directly. Branch → PR → review → merge.
 - Never claim "production-ready". This library is experimental and will
   remain so until a third-party audit. State that clearly when relevant.
+- **Never add public API without a caller.** Adding a function later is
+  non-breaking; removing one is breaking, so speculative surface is a
+  one-way door. If it is a parser it also takes a permanent share of the
+  cumulative fuzz budget away from the surfaces that genuinely face an
+  attacker. Issue #63 is the worked example of declining one — including
+  how the justification for it turned out to be false on inspection.
 
 ---
 

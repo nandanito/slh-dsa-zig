@@ -126,6 +126,22 @@ The two XOF lengths are fixed by FIPS 205 — `SHAKE128(M, 256)` and
 them from the standard and asserts at compile time that they still agree with the
 `std` defaults.
 
+!!! note "There is deliberately no `fromOid()`"
+
+    `PreHash.oid()` has no inverse, and the omission is a decision rather than a
+    gap ([issue #63](https://github.com/nandanito/slh-dsa-zig/issues/63)).
+
+    In this library the OID is only ever an **output**: the signer builds it into
+    `M'` and the verifier rebuilds it. Nothing hands one in. And the bare NIST
+    hash OID is not a wire field either —
+    [RFC 9909](https://www.rfc-editor.org/rfc/rfc9909.xml) assigns a *combined*
+    algorithm identifier per parameter set × pure/pre-hash × hash, so an X.509 or
+    CMS consumer maps a single OID to a `(ParamSet, PreHash)` pair in one step
+    and never sees `2.16.840.1.101.3.4.2.x` on its own.
+
+    If you do need a reverse mapping, the table above is the whole of it — twelve
+    rows, keyed off whatever your protocol actually gives you.
+
 ## The six hash functions — §11
 
 Dispatched by `Hash(p)` in `src/hash.zig`; implemented in `hash_shake.zig` (§11.1)
