@@ -69,8 +69,37 @@ env:
   GATE_HOURS: 24
 
 jobs:
+  # Single source of truth for the target list. The matrix fans out from it and
+  # the gate job checks its rows against it, so a target cannot be fuzzed
+  # without being gated, or silently vanish from the gate by failing early.
+  # (A literal `matrix:` block cannot be read back by a later job, and the `env`
+  # context is not available in `strategy` — hence a job output.)
+  targets:
+    name: fuzz targets
+    runs-on: ubuntu-latest
+    outputs:
+      list: ${{ steps.list.outputs.list }}
+    steps:
+      - id: list
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > targets.json <<'JSON'
+          [
+            {"slug": "verify-shake-128f",          "label": "verify (SLH-DSA-SHAKE-128f)"},
+            {"slug": "verify-sha2-128f",           "label": "verify (SLH-DSA-SHA2-128f)"},
+            {"slug": "verify-prehash-shake-128f",  "label": "verifyPreHash (SLH-DSA-SHAKE-128f)"},
+            {"slug": "verify-prehash-sha2-128f",   "label": "verifyPreHash (SLH-DSA-SHA2-128f)"},
+            {"slug": "acvp-parser",                "label": "ACVP vector parser"},
+            {"slug": "hex-decode",                 "label": "hexDecode"}
+          ]
+          JSON
+          echo "list=$(jq -c . targets.json)" >> "$GITHUB_OUTPUT"
+          jq -r '.[] | "\(.slug)\t\(.label)"' targets.json
+
   fuzz:
     name: fuzz (${{ matrix.target.slug }})
+    needs: targets
     runs-on: ubuntu-latest
     # 4h ceiling: comfortably above the 3h scheduled window, under the 6h cap.
     timeout-minutes: 240
@@ -79,13 +108,7 @@ jobs:
       # counters are independent, and losing a window costs real wall-clock.
       fail-fast: false
       matrix:
-        target:
-          - { slug: verify-shake-128f, label: 'verify (SLH-DSA-SHAKE-128f)' }
-          - { slug: verify-sha2-128f, label: 'verify (SLH-DSA-SHA2-128f)' }
-          - { slug: verify-prehash-shake-128f, label: 'verifyPreHash (SLH-DSA-SHAKE-128f)' }
-          - { slug: verify-prehash-sha2-128f, label: 'verifyPreHash (SLH-DSA-SHA2-128f)' }
-          - { slug: acvp-parser, label: 'ACVP vector parser' }
-          - { slug: hex-decode, label: 'hexDecode' }
+        target: ${{ fromJSON(needs.targets.outputs.list) }}
     steps:
       - uses: actions/checkout@v4
 
@@ -350,7 +373,7 @@ jobs:
   # Genuine failures (crash, lost instrumentation) fail their own matrix job.
   gate:
     name: fuzz gate
-    needs: fuzz
+    needs: [targets, fuzz]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -361,16 +384,19 @@ jobs:
           merge-multiple: true
           path: fuzz-report
 
+      # Absent evidence is not evidence of graduation. A target whose job died
+      # before writing its row must read as "not satisfied", never be quietly
+      # dropped from the denominator — reporting "all 5 cleared" for a six-target
+      # matrix is precisely the class of claim this gate exists to prevent. So
+      # iterate the expected list and look each row up, rather than counting
+      # whatever happened to download.
       - name: Report
         shell: bash
+        env:
+          TARGETS: ${{ needs.targets.outputs.list }}
+          FUZZ_RESULT: ${{ needs.fuzz.result }}
         run: |
           set -euo pipefail
-          shopt -s nullglob
-          rows=(fuzz-report/*.tsv)
-          if [ ${#rows[@]} -eq 0 ]; then
-            echo "::warning::no per-target rows — every fuzz job failed before reporting"
-            exit 0
-          fi
           {
             echo "### Phase gate 3 — cumulative fuzzing, per target"
             echo ""
@@ -380,21 +406,48 @@ jobs:
             echo "| target | cumulative | ${GATE_HOURS}h | coverage-expanding runs | corpus |"
             echo "| --- | --- | --- | --- | --- |"
           } >> "$GITHUB_STEP_SUMMARY"
+
+          expected=0
           cleared=0
-          total=0
-          while IFS=$'\t' read -r slug label secs hours graduated uniq corpus; do
-            [ -n "${slug:-}" ] || continue
-            total=$(( total + 1 ))
+          missing=0
+          while IFS=$'\t' read -r slug label; do
+            expected=$(( expected + 1 ))
+            row="fuzz-report/${slug}.tsv"
+            if [ ! -s "$row" ]; then
+              missing=$(( missing + 1 ))
+              echo "| ${label} | — | ⚠️ no result | — | — |" >> "$GITHUB_STEP_SUMMARY"
+              echo "::warning::${slug}: no row — its job did not finish reporting"
+              continue
+            fi
+            IFS=$'\t' read -r _ _ _ hours graduated uniq corpus < "$row"
             mark='—'
             if [ "$graduated" = 'yes' ]; then mark='✅'; cleared=$(( cleared + 1 )); fi
             echo "| ${label} | ${hours}h | ${mark} | ${uniq} | ${corpus} |" >> "$GITHUB_STEP_SUMMARY"
-          done < <(cat "${rows[@]}")
+          done < <(jq -r '.[] | "\(.slug)\t\(.label)"' <<<"$TARGETS")
+
+          # "Satisfied" requires every expected target present, cleared, and its
+          # job green. `needs.fuzz.result` is success only when the whole matrix
+          # succeeded, so it also covers a crash or lost instrumentation.
+          satisfied=no
+          if [ "$missing" -eq 0 ] && [ "$cleared" -eq "$expected" ] && [ "$FUZZ_RESULT" = 'success' ]; then
+            satisfied=yes
+          fi
           {
             echo ""
-            if [ "$cleared" -eq "$total" ]; then
-              echo "**Gate 3 satisfied: all ${total} targets cleared ${GATE_HOURS}h.**"
+            if [ "$satisfied" = 'yes' ]; then
+              echo "**Gate 3 satisfied: all ${expected} targets cleared ${GATE_HOURS}h.**"
             else
-              echo "**Gate 3 not satisfied: ${cleared}/${total} targets have cleared ${GATE_HOURS}h.**"
+              echo "**Gate 3 not satisfied: ${cleared}/${expected} targets have cleared ${GATE_HOURS}h.**"
+              if [ "$missing" -ne 0 ]; then
+                echo ""
+                echo "> ${missing} target(s) reported nothing this run, so their progress is"
+                echo "> unknown — not zero, and not graduated."
+              fi
+              if [ "$FUZZ_RESULT" != 'success' ]; then
+                echo ""
+                echo "> Matrix result was \`${FUZZ_RESULT}\`. A gate cannot be declared from a"
+                echo "> run that did not complete cleanly."
+              fi
             fi
           } >> "$GITHUB_STEP_SUMMARY"
-          echo "gate 3: ${cleared}/${total} targets cleared ${GATE_HOURS}h"
+          echo "gate 3: cleared ${cleared}/${expected}, missing ${missing}, matrix ${FUZZ_RESULT}, satisfied ${satisfied}"
