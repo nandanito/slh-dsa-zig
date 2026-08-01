@@ -22,6 +22,13 @@ name: fuzz
 #   - Corpus lives in `.zig-cache/f/`, coverage maps in `.zig-cache/v/`; both
 #     are written incrementally, so a `timeout`-terminated run still leaves a
 #     consistent, durable corpus.
+#   - `-ffuzz` instrumentation comes from the LLVM backend only, and
+#     `fuzzer.zig` reads the counters through WEAK externs — so an
+#     uninstrumented build does not fail to link, it silently fuzzes blind with
+#     `pcs_len = 0` and an empty corpus. build.zig pins `use_llvm` on the fuzz
+#     artifact; the `Verify coverage instrumentation` step below asserts the
+#     pin held. This job ran uninstrumented for its whole life before that
+#     assert existed — see issue #68.
 
 on:
   pull_request:
@@ -89,9 +96,17 @@ jobs:
             .zig-cache/f
             .zig-cache/v
             fuzz-stats
-          key: fuzz-corpus-${{ github.run_id }}-${{ github.run_attempt }}
+          # `v2` deliberately orphans every pre-#68 cache entry. Normally that
+          # would be reckless — the accrued corpus is worth weeks of wall-clock
+          # and `restore-keys` exists to protect it. It is safe here only
+          # because the pre-#68 corpus was measured, not assumed: every target
+          # directory in the last nightly's artifact held its two lock files
+          # and zero inputs, because the build was never instrumented. There is
+          # nothing to carry forward, and the counter that came with it counted
+          # blind seconds. Both start again from zero.
+          key: fuzz-corpus-v2-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            fuzz-corpus-
+            fuzz-corpus-v2-
 
       # A crash marker is a single fixed file (`.zig-cache/f/crash`). Delete any
       # copy restored from the cache so that its presence AFTER this run
@@ -141,6 +156,39 @@ jobs:
             echo "crashed=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # An uninstrumented fuzz build is silent by construction: the weak
+      # `__start___sancov_cntrs` extern resolves to zero, the fuzzer reports no
+      # error, and the job stays green while finding nothing. Read the truth out
+      # of the coverage map instead. Layout is `std.Build.abi.SeenPcsHeader`:
+      # three native-endian usizes — n_runs, unique_runs, pcs_len.
+      - name: Verify coverage instrumentation
+        id: cov
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The active map is the one this run just wrote; a map from an earlier,
+          # differently-instrumented binary has a different name and a stale
+          # mtime, so take the newest rather than the first.
+          cov=$(ls -t .zig-cache/v/* 2>/dev/null | head -1 || true)
+          if [ -z "$cov" ]; then
+            echo "::error::no coverage map under .zig-cache/v — the fuzzer never ran"
+            exit 1
+          fi
+          read -r n_runs unique_runs pcs_len < <(od -An -tu8 -N24 "$cov" | tr -s ' ' | tr -d '\n' | awk '{print $1, $2, $3}')
+          echo "coverage map $cov: n_runs=$n_runs unique_runs=$unique_runs pcs_len=$pcs_len"
+          {
+            echo "n_runs=$n_runs"
+            echo "unique_runs=$unique_runs"
+            echo "pcs_len=$pcs_len"
+          } >> "$GITHUB_OUTPUT"
+          if [ "$pcs_len" -eq 0 ]; then
+            echo "::error::pcs_len=0 — the fuzz binary carries no SanitizerCoverage"
+            echo "::error::instrumentation, so this run was blind and its time must not"
+            echo "::error::count toward the gate. Check that build.zig still sets"
+            echo "::error::use_llvm=true on the fuzz artifact. See issue #68."
+            exit 1
+          fi
+
       - name: Update cumulative fuzz-hours
         shell: bash
         run: |
@@ -170,7 +218,10 @@ jobs:
             echo "| --- | --- |"
             echo "| this run | ${elapsed}s${note} |"
             echo "| cumulative (crash-free) | ${total}s (~${hours}h) |"
-            echo "| targets | verify (SHAKE-128f, SHA2-128f), ACVP parser, hexDecode |"
+            echo "| instrumented PCs | ${{ steps.cov.outputs.pcs_len }} |"
+            echo "| total runs | ${{ steps.cov.outputs.n_runs }} |"
+            echo "| coverage-expanding runs | ${{ steps.cov.outputs.unique_runs }} |"
+            echo "| targets | verify + verifyPreHash (SHAKE-128f, SHA2-128f), ACVP parser, hexDecode |"
             echo "| gate | 24h cumulative → component graduates |"
           } >> "$GITHUB_STEP_SUMMARY"
           echo "Cumulative crash-free fuzz time: ${total}s (~${hours}h)${note}"
@@ -186,7 +237,7 @@ jobs:
             .zig-cache/f
             .zig-cache/v
             fuzz-stats
-          key: fuzz-corpus-${{ github.run_id }}-${{ github.run_attempt }}
+          key: fuzz-corpus-v2-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Upload corpus & crashers
         if: always()

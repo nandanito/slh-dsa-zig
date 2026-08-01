@@ -127,6 +127,18 @@ pub fn build(b: *std.Build) void {
     const fuzz_tests = b.addTest(.{
         .root_module = fuzz_mod,
         .test_runner = fuzz_runner,
+        // `-ffuzz` instrumentation is emitted only by the LLVM backend. Zig
+        // 0.16 defaults to the self-hosted x86_64 backend for Debug builds,
+        // which does not implement SanitizerCoverage — and `fuzzer.zig` picks
+        // the counters up through *weak* externs (`__start___sancov_cntrs`),
+        // so a missing section resolves to a zero-length slice instead of a
+        // link error. The fuzzer then runs blind: `pcs_len = 0`, no input is
+        // ever novel, and the corpus stays empty with no diagnostic anywhere.
+        //
+        // That is exactly what the nightly job did on ubuntu-latest until this
+        // line existed — see issue #68. Pin the backend for this artifact only;
+        // the check that it stayed pinned lives in .github/workflows/fuzz.yml.
+        .use_llvm = true,
     });
     const run_fuzz_tests = b.addRunArtifact(fuzz_tests);
 

@@ -29,8 +29,14 @@ zig build fuzz --fuzz=1000000  # coverage-guided, up to N iterations
 ```
 
 `--fuzz` bounds by iteration count; wrap with `timeout` to bound wall-clock.
-Corpus is persisted under `.zig-cache/f/`, coverage maps under `.zig-cache/v/`;
-both accumulate across runs when the cache is preserved.
+Corpus is persisted under `.zig-cache/f/` (one directory per target, named
+`hex(Wyhash(0, test_name))`), coverage maps under `.zig-cache/v/`; both
+accumulate across runs when the cache is preserved.
+
+Coverage feedback requires the **LLVM backend**: `-ffuzz` instrumentation is not
+implemented by Zig 0.16's self-hosted x86_64 backend, which is the default for
+Debug builds on that target. `build.zig` therefore sets `use_llvm = true` on the
+fuzz artifact. Do not remove it — see the gotcha below.
 
 ## The vendored test runner
 
@@ -54,8 +60,23 @@ GitHub Actions caps a single job at 6h, so "≥24h in CI" cannot be one run.
 corpus + coverage + a fuzz-hours counter via `actions/cache`, and reports the
 cumulative total in the job summary. A component graduates once it clears 24h.
 
-**Gotcha for anyone editing the workflow:** `zig build fuzz --fuzz=N` exits `0`
-even when it finds a crash — it writes the reproducer to `.zig-cache/f/crash`
-and logs it, but the return code is success. Crash detection must be
-out-of-band (check for the marker), which is why the workflow deletes any
-restored marker before the run and fails the job if one reappears.
+**Two gotchas for anyone editing the workflow.** Both are failures that keep the
+job green, so both need an out-of-band assert rather than a comment.
+
+1. `zig build fuzz --fuzz=N` exits `0` even when it finds a crash — it writes the
+   reproducer to `.zig-cache/f/crash` and logs it, but the return code is
+   success. Crash detection must be out-of-band (check for the marker), which is
+   why the workflow deletes any restored marker before the run and fails the job
+   if one reappears.
+
+2. An **uninstrumented** build fuzzes blind and says nothing. `fuzzer.zig` reads
+   the coverage counters through *weak* externs (`__start___sancov_cntrs`), so
+   when the backend emits no SanitizerCoverage section the symbols resolve to
+   zero and the counter slice is simply empty — no link error, no warning. With
+   no PCs, no input is ever novel, so the corpus never grows and the run is
+   uniform-random rather than coverage-guided. The nightly job did exactly this
+   for its entire life before issue #68: 24h on the counter, `pcs_len = 0`,
+   `unique_runs = 0`, and every corpus directory empty. The workflow now reads
+   `pcs_len` out of the coverage-map header (`std.Build.abi.SeenPcsHeader`:
+   three native-endian `usize`s — `n_runs`, `unique_runs`, `pcs_len`) after each
+   run and fails the job if it is zero.
