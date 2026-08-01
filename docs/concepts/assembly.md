@@ -146,8 +146,8 @@ insurance that costs two bytes on the wire.
 `ctx.len > 255` returns `error.ContextTooLong`, checked before any hashing.
 
 The **internal** interface (§9.2/§9.3, `signInternal`/`verifyInternal`) signs `M`
-with no prefix at all. It exists because ACVP tests both interfaces separately;
-application code should use the external one.
+with no prefix at all. It exists because ACVP tests each interface separately;
+application code should use one of the external ones.
 
 ### The pre-hash interface
 
