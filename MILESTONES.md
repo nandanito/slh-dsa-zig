@@ -512,3 +512,30 @@ The `🚧 EXPERIMENTAL` banner. This release completes an interface; it is not a
 audit. Phase gates 1, 2, 4 and 5 remain satisfied and gate 3 (cumulative
 fuzzing) continues to accrue nightly — `verifyPreHash` was added to the fuzz
 harnesses on both hash families, so the new surface accrues alongside the rest.
+
+### Considered and declined — `PreHash.fromOid()` (#63)
+
+Floated during #45 as an inverse for `PreHash.oid()`, justified as *"protocols
+select the hash from wire data."* Checked, and the justification conflated two
+claims:
+
+- *the pre-hash function is chosen at runtime from protocol data* — **true**,
+  and it is why `PreHash` is a runtime enum rather than a comptime parameter;
+- *therefore a caller must parse a bare hash OID* — **does not follow**.
+
+[RFC 9909](https://www.rfc-editor.org/rfc/rfc9909.xml) assigns a *combined*
+algorithm identifier per parameter set × pure/pre-hash × hash, so an X.509 or
+CMS consumer maps one OID to a `(ParamSet, PreHash)` pair in a single step. The
+bare `2.16.840.1.101.3.4.2.x` never travels as a standalone field. And within
+this library the OID is only ever an **output** — constructed into `M'` by the
+signer, reconstructed by the verifier — so `fromOid()` would parse input that no
+code path produces.
+
+Declining also avoided a recurring cost: a parser is attacker-facing, so it
+would carry a mandatory fuzz harness, and the fuzz gate is *cumulative* over a
+bounded nightly window — an extra target takes wall-clock from `verify` and the
+ACVP parser every night, permanently.
+
+The general rule this produced is now in `CLAUDE.md`: **never add public API
+without a caller.** Adding a function is non-breaking and removing one is
+breaking, so speculative surface is a one-way door.
