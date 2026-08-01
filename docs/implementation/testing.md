@@ -112,12 +112,14 @@ Effort goes where input is **adversarial by construction**. Fuzzing `keygen` or
 Fuzzing `verify` has a great deal, because that is what processes bytes from the
 network.
 
-Four `std.testing.fuzz` targets:
+Six `std.testing.fuzz` targets:
 
 | Target | Property |
 |---|---|
 | `verify` (SHAKE-128f) | Never panic; never accept a forged signature |
 | `verify` (SHA2-128f) | Same, exercising the other hash dispatcher |
+| `verifyPreHash` (SHAKE-128f) | Same oracle for HashSLH-DSA, with the pre-hash function drawn from fuzzer bytes so all twelve `M'` layouts are reachable |
+| `verifyPreHash` (SHA2-128f) | Same, other hash family |
 | ACVP vector parser | Never panic on malformed JSON |
 | `hexDecode` | Never panic on arbitrary bytes |
 
@@ -128,10 +130,13 @@ real logic flaw, not luck.
 
 ```sh
 zig build fuzz                  # smoke: each target once
-zig build fuzz --fuzz=1000000   # coverage-guided
+zig build fuzz --fuzz=1000000   # coverage-guided, all six in one binary
+
+# One harness at a time — what CI runs, and what the gate counts.
+zig build fuzz-verify-shake-128f --fuzz=1000000
 ```
 
-!!! warning "Two Zig 0.16 fuzzer problems worth knowing"
+!!! warning "Three Zig 0.16 fuzzer problems worth knowing"
 
     **The stock test runner cannot compile fuzz tests** in Zig 0.16.0 (a
     `StackTrace` type split). This library vendors a patched runner at
@@ -142,11 +147,34 @@ zig build fuzz --fuzz=1000000   # coverage-guided
     the corpus directory rather than checking the return value. A CI job that
     naively gated on exit status would report green through every crash it found.
 
+    **An uninstrumented build fuzzes blind and reports nothing.** `-ffuzz`
+    coverage instrumentation is emitted only by the LLVM backend, and Zig 0.16
+    defaults to the self-hosted x86_64 backend for Debug builds. The fuzzer picks
+    up its counters through *weak* externs, so the missing section resolves to
+    zero rather than failing to link: no PCs, no input ever novel, an empty
+    corpus, and no diagnostic. This library's nightly job did exactly that for its
+    entire first life — 24 hours on the clock with a completely empty corpus —
+    until [issue #68](https://github.com/nandanito/slh-dsa-zig/issues/68). The
+    build pins `use_llvm`, and CI now reads the instrumented-PC count out of the
+    coverage map after every run and fails the job if it is zero.
+
 The 6-hour GitHub Actions job cap makes a single ≥24h run impossible, so the gate
 is **cumulative**: a nightly workflow fuzzes a bounded window, persists the corpus
 and coverage via `actions/cache`, and accrues fuzz-hours toward the 24h threshold.
 Only crash-*free* runs count toward it — a run that finds a crash must not advance
 a crash-free counter.
+
+The accrual is counted **per target**, one matrix job per harness, each with its
+own cache and counter
+([issue #65](https://github.com/nandanito/slh-dsa-zig/issues/65)). A single shared
+counter cannot mean what the bar says, for two independent reasons. Nothing is
+shared between targets — corpus and coverage state are per-test, so time spent on
+one buys another nothing. And the fuzzer runs every test in a binary from one
+single-threaded loop, choosing the next by an adaptive weighting, so a window is
+*divided* among the harnesses rather than replicated: a global counter would
+report the full window to all six at once, and adding a harness would quietly take
+time from the ones already there. Running one harness per job removes both
+problems, since the job's wall-clock is then exactly that target's fuzz time.
 
 ## Constant-time verification
 
@@ -269,7 +297,7 @@ introduce and produces impressively fast, entirely meaningless numbers.
 |---|---|
 | `ci.yml` | `zig fmt --check`, build + test on x86_64 and ARM64 (Debug and ReleaseSafe), the ACVP KAT suite, and the Lane B trailer check |
 | `ctgrind.yml` | The Valgrind constant-time check plus its negative control |
-| `fuzz.yml` | A per-PR smoke build, and the nightly cumulative fuzzing run |
+| `fuzz.yml` | A per-PR smoke build, and the nightly cumulative fuzzing run — one matrix job per target, plus a `fuzz gate` job that collects the per-target hours into one table |
 
 `main` is branch-protected: PRs required, force-push and deletion blocked, and the
 above checks required to merge.

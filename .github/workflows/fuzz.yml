@@ -10,6 +10,23 @@ name: fuzz
 # a running total of fuzz-hours is tracked in the job summary. A component
 # graduates once its cumulative time clears the bar.
 #
+# The accounting is PER TARGET, one matrix job each, because the bar is worded
+# per component and a shared number cannot stand in for it (issue #65):
+#
+#   - Nothing is shared between targets. Corpus, `seen_pcs` and `bests` are all
+#     per-test in `Fuzzer.init`, and the corpus directory is keyed by the test
+#     name. Time spent on one target buys another target nothing, so a global
+#     total is not a proxy for any target's progress.
+#   - Within one binary the fuzzer time-slices adaptively between its tests, so
+#     a wall-clock window is divided among them, not replicated. A global
+#     counter therefore over-reports every target at once, and adding a harness
+#     silently dilutes the ones already there.
+#
+# Each job builds a single-harness binary (`zig build fuzz-<slug>`, filtered in
+# build.zig), so the job's wall-clock IS that target's fuzz time. This costs
+# more runner-hours than one shared job and buys each target the whole window
+# instead of roughly a sixth of it.
+#
 # Mechanics worth knowing (all verified against Zig 0.16.0):
 #
 #   - The stock 0.16.0 test runner does NOT compile in fuzz mode; the repo
@@ -47,12 +64,28 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # The per-target bar, in hours. `tests/fuzz/README.md` and CLAUDE.md quote it.
+  GATE_HOURS: 24
+
 jobs:
   fuzz:
-    name: fuzz (${{ github.event_name }})
+    name: fuzz (${{ matrix.target.slug }})
     runs-on: ubuntu-latest
     # 4h ceiling: comfortably above the 3h scheduled window, under the 6h cap.
     timeout-minutes: 240
+    strategy:
+      # One target crashing must not cancel the others: their corpora and
+      # counters are independent, and losing a window costs real wall-clock.
+      fail-fast: false
+      matrix:
+        target:
+          - { slug: verify-shake-128f, label: 'verify (SLH-DSA-SHAKE-128f)' }
+          - { slug: verify-sha2-128f, label: 'verify (SLH-DSA-SHA2-128f)' }
+          - { slug: verify-prehash-shake-128f, label: 'verifyPreHash (SLH-DSA-SHAKE-128f)' }
+          - { slug: verify-prehash-sha2-128f, label: 'verifyPreHash (SLH-DSA-SHA2-128f)' }
+          - { slug: acvp-parser, label: 'ACVP vector parser' }
+          - { slug: hex-decode, label: 'hexDecode' }
     steps:
       - uses: actions/checkout@v4
 
@@ -96,17 +129,19 @@ jobs:
             .zig-cache/f
             .zig-cache/v
             fuzz-stats
-          # `v2` deliberately orphans every pre-#68 cache entry. Normally that
-          # would be reckless — the accrued corpus is worth weeks of wall-clock
-          # and `restore-keys` exists to protect it. It is safe here only
-          # because the pre-#68 corpus was measured, not assumed: every target
-          # directory in the last nightly's artifact held its two lock files
-          # and zero inputs, because the build was never instrumented. There is
-          # nothing to carry forward, and the counter that came with it counted
-          # blind seconds. Both start again from zero.
-          key: fuzz-corpus-v2-${{ github.run_id }}-${{ github.run_attempt }}
+          # One cache per target: it carries that target's corpus directory and
+          # its own counter, so no target can inherit another's credit.
+          #
+          # `v3` (per-target) supersedes the flat `v2` from #68, which in turn
+          # deliberately orphaned everything before it. Orphaning an accrued
+          # corpus is normally reckless — it is worth weeks of wall-clock and
+          # `restore-keys` exists to protect it — and it is acceptable here only
+          # because the pre-#68 corpus was measured empty rather than assumed
+          # so: the build was never instrumented, so no input was ever recorded.
+          # Nothing accrued under `v2` either; it has not survived a nightly.
+          key: fuzz-corpus-v3-${{ matrix.target.slug }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
-            fuzz-corpus-v2-
+            fuzz-corpus-v3-${{ matrix.target.slug }}-
 
       # A crash marker is a single fixed file (`.zig-cache/f/crash`). Delete any
       # copy restored from the cache so that its presence AFTER this run
@@ -116,12 +151,27 @@ jobs:
         shell: bash
         run: rm -f .zig-cache/f/crash
 
-      # Compile the fuzz targets and smoke-run each once (empty input). This
+      # Compile this target's harness and smoke-run it once (empty input). This
       # runs WITHOUT `|| true`, so a broken harness or a bug reachable from the
       # empty input fails the job here — the timed run below swallows
       # `timeout`'s exit code and could otherwise mask a compile failure.
-      - name: Build & smoke-run fuzz targets
-        run: zig build fuzz --summary all
+      #
+      # `fuzz-<slug>` is filtered to exactly one harness, which is what makes
+      # this job's wall-clock equal to that target's fuzz time. The smoke
+      # therefore reports `1 passed`; if a filter ever stops matching, Zig
+      # reports zero tests rather than erroring, so assert the count.
+      - name: Build & smoke-run fuzz target
+        shell: bash
+        run: |
+          set -euo pipefail
+          out=$(zig build fuzz-${{ matrix.target.slug }} --summary all 2>&1)
+          echo "$out"
+          if ! grep -qE '1 passed|1 pass \(1 total\)' <<<"$out"; then
+            echo "::error::expected exactly one harness for"
+            echo "::error::'${{ matrix.target.slug }}'. The build.zig filter no longer"
+            echo "::error::matches exactly one test — per-target accounting is wrong."
+            exit 1
+          fi
 
       - name: Fuzz
         id: fuzz
@@ -129,13 +179,13 @@ jobs:
         run: |
           set -euo pipefail
           secs='${{ steps.cfg.outputs.secs }}'
-          echo "Fuzzing for ${secs}s (zig build fuzz --fuzz)"
+          echo "Fuzzing ${{ matrix.target.slug }} for ${secs}s"
           # `--fuzz` takes an iteration ceiling, not a time limit, so set it far
           # above what the window can reach and let `timeout` bound the wall
           # clock.
           start=$SECONDS
           rc=0
-          timeout "${secs}" zig build fuzz --fuzz=1000000000 --summary all || rc=$?
+          timeout "${secs}" zig build fuzz-${{ matrix.target.slug }} --fuzz=1000000000 --summary all || rc=$?
           elapsed=$(( SECONDS - start ))
           echo "elapsed=${elapsed}" >> "$GITHUB_OUTPUT"
           # Exit-code triage. This build is compiled with `-ffuzz`, unlike the
@@ -211,20 +261,34 @@ jobs:
           hours=$(awk "BEGIN { printf \"%.1f\", $total / 3600 }")
           note=""
           if [ "$crashed" = 'true' ]; then note=" (crash found — not counted)"; fi
+          # Corpus size is the honest companion to the clock: an instrumented
+          # run that finds nothing new still burns time, and #68 showed a clock
+          # can read 24h with an empty corpus.
+          corpus=$(find .zig-cache/f -type f ! -name '*lock' ! -name 'in*' 2>/dev/null | wc -l | tr -d ' ')
+          graduated=no
+          if [ "$total" -ge $(( GATE_HOURS * 3600 )) ]; then graduated=yes; fi
           {
-            echo "### Fuzzing summary"
+            echo "### Fuzzing summary — ${{ matrix.target.label }}"
             echo ""
             echo "| metric | value |"
             echo "| --- | --- |"
+            echo "| target | \`${{ matrix.target.slug }}\` |"
             echo "| this run | ${elapsed}s${note} |"
             echo "| cumulative (crash-free) | ${total}s (~${hours}h) |"
+            echo "| gate (${GATE_HOURS}h) cleared | ${graduated} |"
             echo "| instrumented PCs | ${{ steps.cov.outputs.pcs_len }} |"
             echo "| total runs | ${{ steps.cov.outputs.n_runs }} |"
             echo "| coverage-expanding runs | ${{ steps.cov.outputs.unique_runs }} |"
-            echo "| targets | verify + verifyPreHash (SHAKE-128f, SHA2-128f), ACVP parser, hexDecode |"
-            echo "| gate | 24h cumulative → component graduates |"
+            echo "| corpus entries | ${corpus} |"
           } >> "$GITHUB_STEP_SUMMARY"
-          echo "Cumulative crash-free fuzz time: ${total}s (~${hours}h)${note}"
+          echo "${{ matrix.target.slug }}: ${total}s (~${hours}h), gate cleared: ${graduated}${note}"
+          # One row per target for the aggregate `gate` job below.
+          mkdir -p fuzz-report
+          printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+            '${{ matrix.target.slug }}' "${{ matrix.target.label }}" \
+            "$total" "$hours" "$graduated" \
+            '${{ steps.cov.outputs.unique_runs }}' "$corpus" \
+            > "fuzz-report/${{ matrix.target.slug }}.tsv"
 
       # Persist the grown corpus + counter (scheduled / manual runs only).
       # Runs before the crash gate so a crash-finding run still saves its
@@ -237,23 +301,90 @@ jobs:
             .zig-cache/f
             .zig-cache/v
             fuzz-stats
-          key: fuzz-corpus-v2-${{ github.run_id }}-${{ github.run_attempt }}
+          key: fuzz-corpus-v3-${{ matrix.target.slug }}-${{ github.run_id }}-${{ github.run_attempt }}
 
+      # Artifact names must be unique across the matrix, hence the slug.
       - name: Upload corpus & crashers
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: fuzz-corpus-${{ github.run_id }}
+          name: fuzz-corpus-${{ matrix.target.slug }}-${{ github.run_id }}
           if-no-files-found: ignore
           retention-days: 14
           path: |
             .zig-cache/f/**
             .zig-cache/v/**
 
+      - name: Upload gate row
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-report-${{ matrix.target.slug }}
+          if-no-files-found: ignore
+          retention-days: 14
+          path: fuzz-report/
+
       - name: Fail if a crash was found
         if: steps.fuzz.outputs.crashed == 'true'
         shell: bash
         run: |
-          echo "::error::Fuzzing found a crash. The reproducing input is saved as"
-          echo "::error::.zig-cache/f/crash and uploaded in the fuzz-corpus artifact."
+          echo "::error::Fuzzing found a crash in ${{ matrix.target.slug }}. The"
+          echo "::error::reproducing input is saved as .zig-cache/f/crash and uploaded"
+          echo "::error::in the fuzz-corpus-${{ matrix.target.slug }} artifact."
           exit 1
+
+  # Phase gate 3 reads per target, so report it per target in one place rather
+  # than making a human open six job summaries and take a minimum by hand.
+  # Reports only — a target below the bar is progress, not a failure, and
+  # failing the nightly for it would train everyone to ignore a red fuzz job.
+  # Genuine failures (crash, lost instrumentation) fail their own matrix job.
+  gate:
+    name: fuzz gate
+    needs: fuzz
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Collect per-target rows
+        uses: actions/download-artifact@v4
+        with:
+          pattern: fuzz-report-*
+          merge-multiple: true
+          path: fuzz-report
+
+      - name: Report
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          rows=(fuzz-report/*.tsv)
+          if [ ${#rows[@]} -eq 0 ]; then
+            echo "::warning::no per-target rows — every fuzz job failed before reporting"
+            exit 0
+          fi
+          {
+            echo "### Phase gate 3 — cumulative fuzzing, per target"
+            echo ""
+            echo "Bar is ${GATE_HOURS}h of crash-free, coverage-guided fuzzing per"
+            echo "target. A component graduates when every target covering it clears it."
+            echo ""
+            echo "| target | cumulative | ${GATE_HOURS}h | coverage-expanding runs | corpus |"
+            echo "| --- | --- | --- | --- | --- |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          cleared=0
+          total=0
+          while IFS=$'\t' read -r slug label secs hours graduated uniq corpus; do
+            [ -n "${slug:-}" ] || continue
+            total=$(( total + 1 ))
+            mark='—'
+            if [ "$graduated" = 'yes' ]; then mark='✅'; cleared=$(( cleared + 1 )); fi
+            echo "| ${label} | ${hours}h | ${mark} | ${uniq} | ${corpus} |" >> "$GITHUB_STEP_SUMMARY"
+          done < <(cat "${rows[@]}")
+          {
+            echo ""
+            if [ "$cleared" -eq "$total" ]; then
+              echo "**Gate 3 satisfied: all ${total} targets cleared ${GATE_HOURS}h.**"
+            else
+              echo "**Gate 3 not satisfied: ${cleared}/${total} targets have cleared ${GATE_HOURS}h.**"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "gate 3: ${cleared}/${total} targets cleared ${GATE_HOURS}h"

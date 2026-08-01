@@ -26,7 +26,14 @@ SHAKE/SHA-2, so a fuzzer reaching it signals a real logic flaw.
 ```sh
 zig build fuzz                 # smoke: each target once with empty input
 zig build fuzz --fuzz=1000000  # coverage-guided, up to N iterations
+
+# One harness at a time — what CI runs, and what the 24h gate counts.
+zig build fuzz-verify-shake-128f --fuzz=1000000
 ```
+
+Per-target steps: `fuzz-verify-shake-128f`, `fuzz-verify-sha2-128f`,
+`fuzz-verify-prehash-shake-128f`, `fuzz-verify-prehash-sha2-128f`,
+`fuzz-acvp-parser`, `fuzz-hex-decode`.
 
 `--fuzz` bounds by iteration count; wrap with `timeout` to bound wall-clock.
 Corpus is persisted under `.zig-cache/f/` (one directory per target, named
@@ -58,7 +65,34 @@ API and need no other change.
 GitHub Actions caps a single job at 6h, so "≥24h in CI" cannot be one run.
 `.github/workflows/fuzz.yml` runs nightly for a bounded window, persists the
 corpus + coverage + a fuzz-hours counter via `actions/cache`, and reports the
-cumulative total in the job summary. A component graduates once it clears 24h.
+cumulative total in the job summary. A component graduates once it clears 24h,
+and **the counting is per target** — one matrix job per harness, its own cache,
+its own counter. The `fuzz gate` job collects the six rows into one table.
+
+The per-target split is not bookkeeping taste; a single shared counter cannot
+mean what the bar says (issue #65):
+
+- **Nothing is shared between targets.** `corpus`, `seen_pcs` and `bests` are
+  per-test in `Fuzzer.init`, and each target's corpus lives in its own
+  directory. Time spent fuzzing `hexDecode` buys `verify` nothing, so one
+  number cannot stand in for either.
+- **Within one binary the window is divided, not replicated.** `fuzzer.zig`
+  runs every fuzz test from a single-threaded loop, choosing the next by an
+  adaptive weighting (a quarter on instrumented-PC count, three quarters on how
+  recently that test found something, with a boost for tests that just did). So
+  six harnesses in one binary each get a fraction of the wall clock — and a
+  global counter reports the full window to all six. Adding a harness quietly
+  takes time away from the ones already there.
+
+Running one harness per job removes both problems: `fuzzer.zig` special-cases
+`n_tests == 1` with no swapping, so the job's wall-clock *is* that target's
+fuzz time. `zig build fuzz-<slug>` is the per-target entry point; plain
+`zig build fuzz` still runs all six in one binary, which is right for a smoke
+test and wrong for the gate.
+
+Because the corpus directory is derived from the test name, a filtered binary
+reads and writes exactly the directory the aggregate binary used — splitting
+the jobs does not orphan an accrued corpus.
 
 **Two gotchas for anyone editing the workflow.** Both are failures that keep the
 job green, so both need an out-of-band assert rather than a comment.
