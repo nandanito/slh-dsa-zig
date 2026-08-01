@@ -1,6 +1,6 @@
 .{
     .name = .slh_dsa,
-    .version = "0.1.1",
+    .version = "0.2.0",
 
     // Fingerprint is this package's permanent identity — it survives renames and
     // is how the package manager tells one package from another. It is NOT a

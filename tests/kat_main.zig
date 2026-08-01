@@ -7,8 +7,8 @@
 //!
 //! `--param-set` is optional: when omitted, every parameter set found in
 //! the vector file is exercised. When supplied, only vectors matching that
-//! parameter set are run (useful for iterating on one set while the others
-//! are still skeletons).
+//! parameter set are run — useful because the `s` sets sign slowly, so
+//! narrowing to one set gives a much faster edit/run loop.
 //!
 //! Exit codes:
 //!   0 — all vectors passed.
