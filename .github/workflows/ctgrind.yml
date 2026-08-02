@@ -172,7 +172,6 @@ jobs:
           printf '%-14s %8s %8s %10s\n' TARGET ZMM SHA-NI VALGRIND > /tmp/table
           for cpu in native native-sha x86_64_v3; do
             echo "::group::=== $cpu ==="
-            rm -rf .zig-cache/o
             if ! zig build ctgrind -Doptimize=ReleaseSafe -Dcpu="$cpu" --summary all; then
               printf '%-14s %8s %8s %10s\n' "$cpu" '?' '?' 'BUILD-FAIL' >> /tmp/table
               echo "::endgroup::"; continue
@@ -180,7 +179,13 @@ jobs:
             comp=$(find_bin 'slh-dsa-ctgrind')
             zmm=$(objdump -d "$comp" | grep -cE '%zmm' || true)
             shani=$(objdump -d "$comp" | grep -cE 'sha256(msg1|msg2|rnds2)|sha1(msg1|msg2|nexte|rnds4)' || true)
-            echo "zmm=$zmm sha-ni=$shani"
+            echo "binary=$comp zmm=$zmm sha-ni=$shani"
+            # Self-check: picking a stale binary from another target would make
+            # the whole table meaningless, and `-sha` must mean zero SHA-NI.
+            case "$cpu" in
+              *-sha) [ "$shani" -eq 0 ] || { echo "::error::$cpu binary still has SHA-NI — wrong binary picked"; exit 1; } ;;
+              x86_64_v3) [ "$shani" -eq 0 ] && [ "$zmm" -eq 0 ] || { echo "::error::v3 binary has sha/avx512 — wrong binary picked"; exit 1; } ;;
+            esac
             if valgrind --error-exitcode=1 --leak-check=no --track-origins=yes "$comp" 2>&1 | tail -40; then
               verdict=CLEAN
             else
