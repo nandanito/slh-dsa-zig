@@ -464,3 +464,20 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
           echo "gate 3: cleared ${cleared}/${expected}, missing ${missing}, matrix ${FUZZ_RESULT}, satisfied ${satisfied}"
+
+          # Being below the bar is progress, not a failure — the nightly stays
+          # green while time accrues, so that a red fuzz run keeps meaning
+          # something. But a target that crashed, lost its instrumentation or
+          # never reported is a real failure, and this job is the one stable
+          # context that sees the whole matrix: keeping it green there would let
+          # a required-check configuration pass a run that fuzzed nothing.
+          if [ "$FUZZ_RESULT" != 'success' ]; then
+            echo "::error::fuzz matrix result was '${FUZZ_RESULT}' — see the"
+            echo "::error::per-target jobs for the failure."
+            exit 1
+          fi
+          if [ "$missing" -ne 0 ]; then
+            echo "::error::${missing} target(s) produced no row despite a green"
+            echo "::error::matrix — the report cannot be trusted."
+            exit 1
+          fi
