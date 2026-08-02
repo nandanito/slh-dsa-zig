@@ -116,6 +116,19 @@ jobs:
         uses: mlugg/setup-zig@v2.2.1
         with:
           version: 0.16.0
+          # setup-zig caches the whole of `.zig-cache`, which is also where the
+          # fuzz corpus (`f/`) and coverage maps (`v/`) live — and every job in
+          # this matrix shares one key prefix, `setup-zig-cache-v2-fuzz-…`.
+          # Left on, it smuggles other targets' corpora into this job outside
+          # the per-target cache, makes the corpus count report inputs this
+          # target never produced, and has six jobs race to write one entry.
+          # Observed directly: a single-harness `acvp-parser` job's artifact
+          # contained all six target directories.
+          #
+          # Whatever corpus this job sees must come only from its own
+          # `actions/cache` entry, so opt out. Costs a Zig rebuild per run,
+          # which is noise against a 3h fuzz window.
+          use-cache: false
 
       - name: Determine run parameters
         id: cfg
