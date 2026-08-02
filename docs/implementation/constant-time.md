@@ -248,9 +248,15 @@ The gate covers key generation and signing. Three limits are worth stating plain
     signature, the reconstructed root, and `PK.root` are all public — which is why
     `ht_verify` ends in a plain `std.mem.eql` rather than a constant-time compare.
     Auditing it would verify a property it does not need to have.
--   **One microarchitecture level.** The workflow pins `x86-64-v3`, because the
-    packaged Valgrind cannot decode AVX-512 and SIGILLs on it. The AVX-512 code
-    paths are therefore unaudited. Tracked as
+-   **One microarchitecture level, and no SHA-NI.** The workflow pins
+    `x86-64-v3`, because a `native` build SIGILLs under the packaged Valgrind.
+    The instruction it cannot decode is `sha256msg1` (`0F 38 CC`, legacy-encoded
+    — *not* EVEX), reached from `std/crypto/sha2.zig`'s SHA-NI path; Zig selects
+    that path at comptime when the target has both `sha` and `avx2`, and
+    `x86-64-v3` excludes `sha`. So the unaudited path is SHA-NI, not AVX-512 —
+    measured on the runner, a native build of the harness contains no AVX-512
+    instructions at all. Closing that gap needs a Valgrind newer than any apt
+    offers. Recorded in
     [issue #6](https://github.com/nandanito/slh-dsa-zig/issues/6).
 -   **x86_64 only.** `-fvalgrind` does not compile for aarch64, so there is no ARM
     leg — and none on the maintainer's macOS/Apple-Silicon machine, which is why
