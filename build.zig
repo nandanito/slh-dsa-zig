@@ -145,6 +145,68 @@ pub fn build(b: *std.Build) void {
     const fuzz_step = b.step("fuzz", "Run fuzz harnesses (add --fuzz=N for coverage-guided fuzzing)");
     fuzz_step.dependOn(&run_fuzz_tests.step);
 
+    // Per-target fuzz steps, one harness each — `zig build fuzz-<target>`.
+    //
+    // The aggregate `fuzz` step above is right for a smoke test and wrong for
+    // the 24h gate. `fuzzer.zig` drives every fuzz test in a binary from one
+    // single-threaded loop (`while (fuzzer.select()) |i| runTest(i)`), picking
+    // the next test by an adaptive weighting — a quarter on instrumented-PC
+    // count, three quarters on how recently the test found something. So a
+    // wall-clock window is *divided* among the tests in the binary, never
+    // replicated: with six harnesses no target accrues the window, and adding
+    // a harness silently cuts every existing target's share.
+    //
+    // A compile-time filter reduces the binary to a single test, which
+    // `fuzzer.zig` special-cases — `if (n_tests == 1) runTest(0)`, no swapping
+    // — so the whole window lands on one target and its seconds are exactly
+    // the job's seconds. That is what makes the per-component wording of the
+    // gate literally true rather than aspirational. See issue #65.
+    //
+    // Filtering is safe for the accrued corpus: the corpus directory is
+    // `f/hex(Wyhash(0, test_name))`, a function of the test *name* only, so a
+    // filtered binary reads and writes exactly the directory the aggregate
+    // binary used. Corpora are per-target throughout — `corpus`, `seen_pcs`
+    // and `bests` are all per-test in `Fuzzer.init` — which is also why time
+    // spent on one target buys nothing for another, and why a single global
+    // counter could not stand in for per-target progress.
+    const FuzzTarget = struct {
+        /// `zig build fuzz-<slug>`; also the per-target cache and counter key.
+        slug: []const u8,
+        /// Substring of the test name. Must match exactly one harness.
+        filter: []const u8,
+    };
+    const fuzz_targets = [_]FuzzTarget{
+        .{ .slug = "verify-shake-128f", .filter = "verify rejects arbitrary bytes (SLH-DSA-SHAKE-128f)" },
+        .{ .slug = "verify-sha2-128f", .filter = "verify rejects arbitrary bytes (SLH-DSA-SHA2-128f)" },
+        .{ .slug = "verify-prehash-shake-128f", .filter = "verifyPreHash rejects arbitrary bytes (SLH-DSA-SHAKE-128f)" },
+        .{ .slug = "verify-prehash-sha2-128f", .filter = "verifyPreHash rejects arbitrary bytes (SLH-DSA-SHA2-128f)" },
+        .{ .slug = "acvp-parser", .filter = "ACVP vector parser tolerates arbitrary bytes" },
+        .{ .slug = "hex-decode", .filter = "hexDecode tolerates arbitrary bytes" },
+    };
+    for (fuzz_targets) |ft| {
+        const one_mod = b.createModule(.{
+            .root_source_file = b.path("tests/fuzz/harness.zig"),
+            .target = target,
+            .optimize = optimize,
+        });
+        one_mod.addImport("slh_dsa", slh_dsa_mod);
+        one_mod.addImport("kat", kat_main_mod);
+
+        const one_test = b.addTest(.{
+            .root_module = one_mod,
+            .test_runner = fuzz_runner,
+            .filters = &.{ft.filter},
+            .use_llvm = true, // see the aggregate artifact above (#68)
+        });
+        const run_one = b.addRunArtifact(one_test);
+
+        const step = b.step(
+            b.fmt("fuzz-{s}", .{ft.slug}),
+            b.fmt("Fuzz one harness: {s} (add --fuzz=N)", .{ft.filter}),
+        );
+        step.dependOn(&run_one.step);
+    }
+
     // ---------------------------------------------------------------------
     // Constant-time (ctgrind) harnesses — taint the secret key so Valgrind's
     // memcheck can flag any secret-dependent branch or memory access. Uses

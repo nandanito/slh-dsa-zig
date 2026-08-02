@@ -92,7 +92,7 @@ These are non-negotiable for code in `src/`:
 | **No allocations in hot paths** | Stack buffers, comptime sizing, explicit lifetimes. Heap use must be justified and documented. |
 | **Zeroize secrets** | Every secret cleared before scope exit. Use volatile semantics where the compiler may DCE the zeroing. |
 | **KAT-validated** | Scheme-level operations (keyGen/sigGen/sigVer) must pass NIST ACVP vectors before being declared functional. Components without NIST vectors (WOTS+, XMSS, FORS internals) are validated via the scheme-level KATs that exercise them, spec-derived property tests, and reference-derived intermediate fixtures where needed (issue #7). |
-| **Fuzzed** | Every parser, deserializer, and attacker-facing API gets a `std.testing.fuzz` harness. The 6h GHA job cap means the gate is *cumulative*: a nightly workflow fuzzes a bounded window, persists the corpus, and accrues ≥24h total before a component graduates. See `tests/fuzz/` and issue #9. |
+| **Fuzzed** | Every parser, deserializer, and attacker-facing API gets a `std.testing.fuzz` harness. The 6h GHA job cap means the gate is *cumulative*: a nightly workflow fuzzes a bounded window, persists the corpus, and accrues ≥24h **per target** before a component graduates — one matrix job per harness, each with its own cache and counter, because nothing is shared between targets and a single binary divides its window among them (#65). Coverage instrumentation needs `use_llvm`; without it the fuzzer runs blind and says nothing (#68). See `tests/fuzz/` and issue #9. |
 | **Benchmarked** | Within 2× of PQClean's portable `clean` C reference, **both sides built without hardware hash acceleration** — on x86-64 that means `-Dcpu=x86_64_v3` (AVX2, no SHA-NI). Accelerated and AVX2 numbers are published alongside, never gated. Gating an accelerated build measures the CPU's hash unit, not this library, and would let a regression in the surrounding SLH-DSA code hide behind it. See `bench/README.md` and issue #40. |
 | **ctgrind/valgrind-verified** | Constant-time properties empirically verified, not just claimed. |
 
@@ -361,7 +361,9 @@ six phase gates:
 
 1. **Functional** — KATs pass on x86_64 and ARM64.
 2. **Constant-time** — ctgrind/valgrind clean on hot paths.
-3. **Fuzz** — ≥24h *cumulative* fuzzing (nightly, corpus persisted) surfaces no crashes.
+3. **Fuzz** — ≥24h *cumulative* fuzzing **per target** (nightly, corpus
+   persisted) surfaces no crashes. A component graduates when every target
+   covering it clears the bar; the `fuzz gate` job reports the table.
 4. **Benchmark** — within 2× of PQClean reference on equivalent hardware.
 5. **Documentation** — README, inline docs, examples up to date.
 6. **Banner** — `🚧 EXPERIMENTAL` remains prominent until specific
