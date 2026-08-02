@@ -46,13 +46,38 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y valgrind
 
-      # Pin the target CPU to the x86-64-v3 microarchitecture level (AVX2,
-      # FMA, BMI — but NOT AVX-512). The GitHub x86_64 runners expose AVX-512,
-      # so a `native` build of the SHA-2/SHA-3 code emits EVEX-encoded 512-bit
-      # instructions that the apt Valgrind (3.22) cannot decode — it SIGILLs
-      # before validating anything. v3 keeps realistic vectorisation within
-      # Valgrind's instruction support. Lift back to native once Valgrind
-      # handles AVX-512 — see #6.
+      # Pin the target CPU to the x86-64-v3 microarchitecture level (AVX2, FMA,
+      # BMI — but not SHA-NI). A `native` build SIGILLs under the packaged
+      # Valgrind before validating anything; v3 keeps realistic vectorisation
+      # within Valgrind's instruction support.
+      #
+      # The instruction Valgrind cannot decode is SHA-NI, NOT AVX-512, which is
+      # what this comment and #6 claimed until measured on 2026-08-02:
+      #
+      #   vex amd64->IR: unhandled instruction bytes: 0xF 0x38 0xCC ...
+      #   vex amd64->IR:   VEX=0 VEX.L=0
+      #
+      # `0F 38 CC` with VEX=0 is `sha256msg1` — legacy-encoded SHA-NI, not EVEX
+      # — reached from `std/crypto/sha2.zig`'s SHA-NI path via `hash_sha2.zig`
+      # `prf`. Zig selects that path at comptime when the target has both `sha`
+      # and `avx2`, and `x86_64_v3` excludes `sha`, which is the real reason
+      # this pin works.
+      #
+      # Measured on the same runner (components harness, ubuntu-24.04,
+      # Valgrind 3.22.0, CPU advertising avx512f + sha_ni):
+      #
+      #   target       zmm  SHA-NI  valgrind
+      #   native         0      56  FAIL
+      #   native-sha     0       0  CLEAN
+      #   x86_64_v3      0       0  CLEAN
+      #
+      # So there is no AVX-512 to cover: the binary contains none even when
+      # built native. `native-sha` is also clean and marginally more faithful,
+      # but native varies between runners, and trading a reproducible security
+      # gate for a difference that disassembles to nothing is a bad deal.
+      # The genuinely uncovered path is SHA-NI, and that needs a Valgrind newer
+      # than anything apt offers (ubuntu-24.04 candidate is 1:3.22.0-0ubuntu3,
+      # no backport). Decision recorded in #6 — keep the pin.
       #
       # ReleaseSafe: optimised (so the audited code is the code that ships)
       # but with safety checks, and with the constant-time markers active.
@@ -128,4 +153,5 @@ jobs:
           echo "::notice::Public SK.seed-derived intermediates (R, PK_FORS, each"
           echo "::notice::XMSS root) are declassified in-library via src/ct.zig."
           echo "::notice::Not covered: verify (no secret inputs by construction),"
-          echo "::notice::and the AVX-512 code paths Valgrind cannot decode (#6)."
+          echo "::notice::and std.crypto's SHA-NI path, which the packaged Valgrind"
+          echo "::notice::cannot decode — the build excludes the 'sha' feature (#6)."

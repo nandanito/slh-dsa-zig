@@ -13,7 +13,7 @@ stateless hash-based post-quantum signature scheme also known as SPHINCS+.
 > This library is under active development. The cryptographic core is implemented and passes
 > the NIST ACVP vectors for all 12 parameter sets, but it has **not been audited** by a third
 > party. Constant-time verification now covers key generation and signing end-to-end under
-> Valgrind, on x86-64 only and with AVX-512 paths excluded ([#6](https://github.com/nandanito/slh-dsa-zig/issues/6)).
+> Valgrind, on x86-64 only and with `std.crypto`'s SHA-NI path excluded ([#6](https://github.com/nandanito/slh-dsa-zig/issues/6)).
 > Passing KATs proves conformance to the spec, not resistance to an attacker. The repository is
 > published openly to support deep learning and public review.
 > Do not use it to protect anything you care about.
@@ -67,7 +67,7 @@ post-quantum cryptography effort in Zig, and the direct successor to
 | HashSLH-DSA (pre-hash) | FIPS 205 §10.2.2, §10.3 | ✅ `signPreHash` / `verifyPreHash`, 12 approved hash functions · ACVP pre-hash KATs pass (288 sigGen + 168 sigVer) |
 | NIST ACVP KAT runner | — | ✅ keyGen · sigGen · sigVer modes, no groups skipped |
 | Benchmarks vs PQClean | — | ✅ Gated portable-vs-portable on x86-64: **35/36 inside the 2× gate**, worst 2.06× (`SHA2-256s keygen`) (#10, #40) · SHAKE parity at 0.96× isolates the excess to the hash-adapter layer (`std.crypto`'s SHA-2 — SHA-512 at this security level, not SHA-256), not to this library's structural code · accelerated build passes 36/36, published alongside but not gated |
-| Constant-time verification | ctgrind / valgrind | ✅ Key generation + signing verified constant-time in SK.seed/SK.prf under Valgrind, plus the WOTS+/FORS primitives in isolation (#34) · run on SHAKE/SHA2-128f + 192f, which cover every adapter code path (incl. the SHA-512 widening); other sets differ only in public tree geometry · x86-64-v3 only; AVX-512 paths open (#6) |
+| Constant-time verification | ctgrind / valgrind | ✅ Key generation + signing verified constant-time in SK.seed/SK.prf under Valgrind, plus the WOTS+/FORS primitives in isolation (#34) · run on SHAKE/SHA2-128f + 192f, which cover every adapter code path (incl. the SHA-512 widening); other sets differ only in public tree geometry · x86-64-v3, which excludes `std.crypto`'s SHA-NI path — the one instruction set the packaged Valgrind cannot decode (#6) |
 | Fuzz harnesses | std.testing.fuzz | 🚧 Six harnesses wired (`verify` + `verifyPreHash` on both hash families, ACVP parser, `hexDecode`); accrual **restarted 2026-08-02** — the nightly job was never coverage-instrumented, so the 24h it had banked was blind random input and did not count (#68). Now instrumented, counted per target, and asserted each run (#9, #65) |
 
 Legend: ✅ implemented and tested · 🚧 skeleton / in progress · ⏳ planned · ❌ not started
@@ -280,8 +280,9 @@ arrives as early as possible (see issue #7):
       2026-08-02, so its first 24h counted nothing and the clock restarted
 - [x] Constant-time audit pass (ctgrind / valgrind, issue #34) — component-level
       and whole-path (keygen + sign) taint tracking, both hash families, with a
-      negative control against vacuity. Lifting the `x86-64-v3` pin so the
-      AVX-512 paths are covered too is open as issue #6
+      negative control against vacuity. The `x86-64-v3` pin stays: measurement
+      under #6 showed the undecodable instructions are SHA-NI, not AVX-512, and
+      that a native build contains no AVX-512 at all
 - [x] Benchmark suite + pinned PQClean comparison (issues #10, #40) — gate pinned
       to PQClean `clean`, measured portable-vs-portable on x86-64: 35/36 inside 2×,
       worst 2.06×, with the excess attributed by the SHAKE control to the hash
@@ -319,8 +320,7 @@ arrives as early as possible (see issue #7):
       completes an interface, not an audit
 
 **Next:** nothing is queued. Milestones 1–3 and the `0.2.0` surface are all
-closed, and the only open issue is #6 (lift the ctgrind AVX-512 pin), which is
-blocked externally on Valgrind. Phase gate 3 (cumulative fuzzing) accrues
+closed, and no issues are open. Phase gate 3 (cumulative fuzzing) accrues
 nightly on its own schedule; it is **not** satisfied, and the counter restarted
 on 2026-08-02 because the job had never been coverage-instrumented (#68).
 

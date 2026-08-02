@@ -183,10 +183,14 @@ taint tracking of `SK.seed` and `SK.prf` through the secret-processing primitive
 *and* through a whole key generation + signature, both hash families, with a
 negative control proving the gate is not vacuous.
 
-The AVX-512 caveat: the workflow pins the target to `x86-64-v3` because the
-packaged Valgrind cannot decode AVX-512 and SIGILLs on it. Tracked as
-[issue #6](https://github.com/nandanito/slh-dsa-zig/issues/6), to be lifted when
-Valgrind catches up.
+The microarchitecture caveat: the workflow pins the target to `x86-64-v3`
+because a `native` build SIGILLs under the packaged Valgrind. The undecodable
+instruction is `sha256msg1` — SHA-NI, not AVX-512 as this once said — and
+`x86-64-v3` works precisely because it excludes the `sha` feature that
+`std/crypto/sha2.zig` needs to take that path. A native build of the harness
+contains no AVX-512 at all, so there is no AVX-512 gap to close. See
+[issue #6](https://github.com/nandanito/slh-dsa-zig/issues/6) for the
+measurement.
 
 ## Benchmarks
 

@@ -329,8 +329,9 @@ banner stays up — it comes down for a third-party audit, not for a green CI ru
   computes each leaf exactly once and does `h'` *fewer* node hashes than a
   treehash sweep would. No optimisation available; the docs that repeated the
   claim were corrected instead.
-- **#6** — lift the ctgrind `x86-64-v3` pin once Valgrind can decode AVX-512.
-  Externally blocked.
+- **#6** — the ctgrind `x86-64-v3` pin. Kept, with the reason corrected: the
+  instruction Valgrind cannot decode is SHA-NI, not AVX-512, and a native build
+  contains no AVX-512 at all.
 - **#45** — HashSLH-DSA pre-hash variants.
 
 ### Reference
