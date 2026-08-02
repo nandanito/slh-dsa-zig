@@ -117,6 +117,7 @@ jobs:
       - name: Coverage note
         if: always()
         run: |
+          echo "::notice::PROBE-ONLY BRANCH — see the avx512-probe job."
           echo "::notice::Verifies that no branch and no memory address in key"
           echo "::notice::generation (FIPS 205 §9.1) or signing (§9.2) depends on"
           echo "::notice::the value of SK.seed or SK.prf, plus the secret-processing"
@@ -129,3 +130,73 @@ jobs:
           echo "::notice::XMSS root) are declassified in-library via src/ct.zig."
           echo "::notice::Not covered: verify (no secret inputs by construction),"
           echo "::notice::and the AVX-512 code paths Valgrind cannot decode (#6)."
+
+  # TEMPORARY PROBE (issue #6) — never blocking. Answers, by running rather
+  # than by reading a changelog: what Valgrind does ubuntu-latest ship today,
+  # is a newer one apt-installable without a PPA, and does it actually decode
+  # the EVEX/zmm a `native` ReleaseSafe build emits?
+  avx512-probe:
+    name: avx512 probe (non-blocking)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Zig
+        uses: mlugg/setup-zig@v2.2.1
+        with:
+          version: 0.16.0
+
+      - name: Environment
+        run: |
+          . /etc/os-release && echo "runner: $PRETTY_NAME"
+          sudo apt-get update -qq
+          echo "--- apt candidates ---"
+          apt-cache policy valgrind
+          sudo apt-get install -y valgrind >/dev/null
+          echo "--- installed ---"
+          valgrind --version
+          echo "--- avx512 flags on this runner ---"
+          lscpu | tr ' ' '\n' | grep -o 'avx512[a-z0-9_]*' | sort -u | tr '\n' ' '; echo
+          echo "--- what zig thinks native is ---"
+          zig build-exe --show-builtin 2>/dev/null | grep -c avx512 || true
+
+      - name: Build native (no -Dcpu pin)
+        run: zig build ctgrind -Doptimize=ReleaseSafe --summary all
+
+      - name: Does the native build actually contain EVEX?
+        run: |
+          set -euo pipefail
+          bin=$(find .zig-cache -name 'slh-dsa-ctgrind-sign' -type f -perm -u+x \
+                -printf '%T@ %p\n' | sort -nr | head -1 | awk '{print $2}')
+          echo "binary: $bin"
+          # If the native build emits no zmm/EVEX at all, the probe proves
+          # nothing about AVX-512 support and must not be read as success.
+          n=$(objdump -d "$bin" | grep -cE '%zmm|\{%k[0-7]\}' || true)
+          echo "EVEX/zmm instruction count: $n"
+          if [ "$n" -eq 0 ]; then
+            echo "::warning::native build emitted no AVX-512 — a green run below"
+            echo "::warning::says nothing about Valgrind's AVX-512 support."
+          fi
+
+      - name: Run the three Valgrind passes on the native build
+        run: |
+          set -euo pipefail
+          find_bin() {
+            find .zig-cache -name "$1" -type f -perm -u+x \
+              -printf '%T@ %p\n' | sort -nr | head -1 | awk '{print $2}'
+          }
+          negctl=$(find_bin 'slh-dsa-ctgrind-negctl')
+          components=$(find_bin 'slh-dsa-ctgrind')
+          whole=$(find_bin 'slh-dsa-ctgrind-sign')
+
+          echo "== negative control: MUST be flagged =="
+          if valgrind --error-exitcode=1 --leak-check=no --track-origins=yes "$negctl"; then
+            echo "::error::negative control not flagged — gate would be vacuous"
+            exit 1
+          fi
+          echo "== components: expecting clean =="
+          valgrind --error-exitcode=1 --leak-check=no --track-origins=yes "$components"
+          echo "== whole keygen + sign: expecting clean =="
+          valgrind --error-exitcode=1 --leak-check=no --track-origins=yes "$whole"
+          echo "PROBE RESULT: native build ran clean under this Valgrind"
