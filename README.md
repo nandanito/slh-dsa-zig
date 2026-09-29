@@ -68,7 +68,7 @@ post-quantum cryptography effort in Zig, and the direct successor to
 | NIST ACVP KAT runner | — | ✅ keyGen · sigGen · sigVer modes, no groups skipped |
 | Benchmarks vs PQClean | — | ✅ Gated portable-vs-portable on x86-64: **35/36 inside the 2× gate**, worst 2.06× (`SHA2-256s keygen`) (#10, #40) · SHAKE parity at 0.96× isolates the excess to the hash-adapter layer (`std.crypto`'s SHA-2 — SHA-512 at this security level, not SHA-256), not to this library's structural code · accelerated build passes 36/36, published alongside but not gated |
 | Constant-time verification | ctgrind / valgrind | ✅ Key generation + signing verified constant-time in SK.seed/SK.prf under Valgrind, plus the WOTS+/FORS primitives in isolation (#34) · run on SHAKE/SHA2-128f + 192f, which cover every adapter code path (incl. the SHA-512 widening); other sets differ only in public tree geometry · x86-64-v3, which excludes `std.crypto`'s SHA-NI path — the one instruction set the packaged Valgrind cannot decode (#6) |
-| Fuzz harnesses | std.testing.fuzz | 🚧 Six harnesses wired (`verify` + `verifyPreHash` on both hash families, ACVP parser, `hexDecode`); accrual **restarted 2026-08-02** — the nightly job was never coverage-instrumented, so the 24h it had banked was blind random input and did not count (#68). Now instrumented, counted per target, and asserted each run (#9, #65) |
+| Fuzz harnesses | std.testing.fuzz | ✅ Phase gate 3 cleared 2026-09-28: all six targets (`verify` + `verifyPreHash` on both hash families, ACVP parser, `hexDecode`) past 24h of crash-free, coverage-guided fuzzing, **counted per target** (#9, #65, #73). The clock started 2026-08-02; hours banked before that were uninstrumented and do not count (#68) · the parsers are genuinely explored, but the pure `verify` harnesses saturate almost at once (3–5 coverage-expanding inputs each), because random input is rejected at the same point every time — so their hours show random input cannot crash `verify`, not that structurally valid near-miss signatures were exercised |
 
 Legend: ✅ implemented and tested · 🚧 skeleton / in progress · ⏳ planned · ❌ not started
 
@@ -275,9 +275,10 @@ arrives as early as possible (see issue #7):
 **Milestone 3 — hardening and release:**
 
 - [x] Fuzz harnesses + cumulative nightly fuzzing (issue #9) — harnesses and the
-      nightly workflow are merged; the cumulative accrual itself runs in CI, per
-      target since #65. Note #68: the job was never coverage-instrumented until
-      2026-08-02, so its first 24h counted nothing and the clock restarted
+      nightly workflow are merged, counted per target since #65. Note #68: the job
+      was never coverage-instrumented until 2026-08-02, so its first 24h counted
+      nothing and the clock restarted. **All six targets cleared 24h on
+      2026-09-28** (#73)
 - [x] Constant-time audit pass (ctgrind / valgrind, issue #34) — component-level
       and whole-path (keygen + sign) taint tracking, both hash families, with a
       negative control against vacuity. The `x86-64-v3` pin stays: measurement
@@ -320,9 +321,11 @@ arrives as early as possible (see issue #7):
       completes an interface, not an audit
 
 **Next:** nothing is queued. Milestones 1–3 and the `0.2.0` surface are all
-closed, and no issues are open. Phase gate 3 (cumulative fuzzing) accrues
-nightly on its own schedule; it is **not** satisfied, and the counter restarted
-on 2026-08-02 because the job had never been coverage-instrumented (#68).
+closed. Phase gate 3 (cumulative fuzzing) was **satisfied on 2026-09-28**: every
+target cleared 24h, counted from the 2026-08-02 restart after #68, with no night
+missed (#73). The nightly keeps running, both as a regression check and so that
+corpora keep growing. Of the six phase gates, five are satisfied; the sixth, the
+`🚧 EXPERIMENTAL` banner, stays until a third-party audit.
 
 Issue #38 proposed an iterative treehash for `xmss_sign` on the premise that the
 authentication path recomputes shared subtrees. It does not: the `h'` sibling
