@@ -6,19 +6,22 @@
 > anything you care about.** This document describes the responsible disclosure path we will
 > follow as the project matures, not a guarantee of audit-grade behaviour today.
 
-The library is in **pre-1.0** development. Constant-time discipline, fuzz coverage, and
-KAT validation are being built out incrementally. Until each component is marked ✅ in the
-README status table *and* `v0.1.0` is tagged, treat **every** primitive as untrusted.
+The library is in **pre-1.0** development. Every component is marked ✅ in the README
+status table: NIST ACVP vectors pass, constant-time behaviour is checked under Valgrind,
+and each fuzz target has cleared 24h. None of that is an audit. Until a third-party audit,
+treat **every** primitive as untrusted, whatever the status table says.
 
 ## Supported versions
 
 | Version | Status | Security updates |
 |---|---|---|
-| `main`  | Active development | Issues fixed in-place; no backports |
-| `0.x`   | Not yet released | n/a |
+| `main`   | Active development | Fixed in place |
+| `v0.2.x` | Latest release (experimental) | Fixed in the next `0.x` release |
+| `v0.1.x` | Superseded | None — upgrade to the latest release |
 
-There is no LTS branch yet. Once a tagged release exists, this section will document the
-support window.
+Only the latest `0.x` release is supported. There are no backports and no LTS branch.
+In `0.x` a fix may arrive in a release that is also breaking; the release notes say so
+when it does.
 
 ## Reporting a vulnerability
 
@@ -27,10 +30,12 @@ violation, a side-channel concern, a KAT mismatch that suggests a correctness bu
 ADRS-encoding inconsistency, or an issue with how secret material is handled in memory —
 please report it privately.
 
-**Preferred channel:** [GitHub Security Advisory](https://github.com/nandanito/slh-dsa-zig/security/advisories/new).
+**Channel:** [GitHub private vulnerability reporting](https://github.com/nandanito/slh-dsa-zig/security/advisories/new)
+(opens a draft security advisory visible only to the maintainer and you).
 
-**Backup channel:** email *(placeholder — to be filled in before first release; until then,
-GitHub Security Advisory is the only supported channel)*.
+There is no email channel yet; GitHub private vulnerability reporting is the only supported
+route. If you cannot use it, open a public issue that asks for a private contact and says
+nothing about the finding itself.
 
 Please include:
 
