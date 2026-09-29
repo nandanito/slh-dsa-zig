@@ -533,10 +533,83 @@ signer, reconstructed by the verifier — so `fromOid()` would parse input that 
 code path produces.
 
 Declining also avoided a recurring cost: a parser is attacker-facing, so it
-would carry a mandatory fuzz harness, and the fuzz gate is *cumulative* over a
-bounded nightly window — an extra target takes wall-clock from `verify` and the
-ACVP parser every night, permanently.
+would carry a mandatory fuzz harness, and with it a permanent place in the
+nightly fuzz workflow and its own 24h gate to clear.
+
+> **Corrected 2026-09-29 (#76).** This paragraph originally said an extra target
+> "takes wall-clock from `verify` and the ACVP parser every night". That was
+> true of the schedule when it was written, when one binary divided a single
+> nightly window between all harnesses. #65 gave each target its own job and
+> its own full window, so the cost is now runner time and another target to
+> graduate, not time taken from the others. The decision stands; only the
+> mechanism changed.
 
 The general rule this produced is now in `CLAUDE.md`: **never add public API
 without a caller.** Adding a function is non-breaking and removing one is
 breaking, so speculative surface is a one-way door.
+
+---
+
+## Phase gate 3 — the fuzz clock restarted, then cleared (2026-08-01 → 2026-09-28)
+
+**Goal:** clear gate 3, meaning ≥24h of crash-free, coverage-guided fuzzing on
+every attacker-facing surface, accrued nightly because a GitHub Actions job is
+capped at 6h.
+
+### The first 24h measured nothing (#68, PR #69, 2026-08-01)
+
+The job summary reported ~24h accrued, and the corpus artifact behind that
+number held **zero inputs** for every target: `pcs_len = 0`, `unique_runs = 0`.
+Zig 0.16 builds Debug with its self-hosted x86_64 backend, which emits no
+SanitizerCoverage, and the fuzzer reads its counters through *weak* externs, so
+the missing section resolved to zero instead of failing to link. The job
+had fuzzed blind for its whole life, with nothing to show it.
+
+Fix: `use_llvm = true` on the fuzz artifact, plus a CI step that reads `pcs_len`
+out of the coverage map after every run and fails the job if it is zero. A
+5-minute smoke run after the fix found 3941 coverage-expanding inputs. The clock
+restarted from zero, and the old cache was deliberately orphaned. That is
+normally reckless, but here the old corpus was *measured* empty, not assumed so.
+
+### One counter could not mean "per target" (#65, PR #70, 2026-08-02)
+
+The gate is worded per component, but the workflow kept one shared counter for
+one binary running every harness. Neither reason for keeping it global
+survived inspection. Targets share no corpus, coverage or state, so time on one
+buys another nothing. And one binary *divides* its window among its harnesses
+instead of giving each the full window, so the shared counter over-reported every
+target at once, and adding a harness quietly diluted the rest. The workflow
+now runs one matrix job per harness, each with its own cache and counter, and a
+`fuzz gate` job that reports the table. The job fails if any expected target is
+missing, rather than dropping it from the count.
+
+### Outcome — cleared (#73, PR #74)
+
+Nightly run `36403505136` (2026-09-28): **6/6 targets cleared**, each at
+626 400 s = 174.0h. That is exactly 58 nights × 3h since the restart, so no
+night was missed and no counter was reset by cache eviction.
+
+What the hours show is uneven, and the README says so:
+
+| Target | Runs | Coverage-expanding inputs |
+|---|---|---|
+| `acvp-parser` | 2.7 B | 32 365 |
+| `hex-decode` | 11.6 B | 358 |
+| `verifyPreHash` (SHAKE-128f) | 5.5 M | 118 |
+| `verifyPreHash` (SHA2-128f) | 9.0 M | 33 |
+| `verify` (SHAKE-128f) | 8.9 M | 5 |
+| `verify` (SHA2-128f) | 58.6 M | 3 |
+
+The parsers were explored in depth. The pure `verify` harnesses saturated
+almost at once: a uniformly random key or signature is rejected at the same
+point every time. Their 174h shows that random input cannot crash `verify`,
+not that structurally valid near-miss signatures were exercised. A
+structure-aware `verify` harness is the obvious follow-up.
+
+Five of the six phase gates are now satisfied. The sixth, the
+`🚧 EXPERIMENTAL` banner, comes down only for a third-party audit.
+
+### Reference
+
+Issues: #68, #65, #73, #6 (ctgrind pin, closed alongside — see Milestone 3's
+follow-ups). PRs: #69, #70, #72, #74.
